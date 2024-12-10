@@ -234,8 +234,11 @@ def result_section():
                             # 그래프 생성
                             st.subheader("DoDH (%) Over Time on Stream (h)")
                             plt.figure(figsize=(10, 6))
-                            plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], 
-                                     marker='o', label="DoDH (%)")
+                            plt.plot(
+                                filtered_data['Time on stream (h)'].to_numpy(),
+                                filtered_data['DoDH(%)'].to_numpy(),
+                                marker='o', label="DoDH (%)"
+                            )
                             plt.xlabel("Time on stream (h)")
                             plt.ylabel("DoDH (%)")
                             plt.title("DoDH (%) vs Time on stream (h)")
@@ -248,6 +251,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 
 # 데이터 보기 및 삭제
