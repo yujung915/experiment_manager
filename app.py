@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 데이터베이스 연결
-conn = sqlite3.connect("experiment_manager.db")
+conn = sqlite3.connect("experiment_manager.db", check_same_thread=False)
 c = conn.cursor()
 
 # 데이터베이스 초기화
@@ -50,71 +50,122 @@ c.execute('''CREATE TABLE IF NOT EXISTS results (
 
 conn.commit()
 
+
 # 결과 섹션
 def result_section():
-    st.header("Result Analysis")
+    try:
+        st.header("Result Analysis")
+        user_id = st.session_state.get('user_id', None)
 
-    # Reaction 데이터 가져오기
-    user_id = st.session_state['user_id']
-    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, reaction.catalyst_amount, synthesis.name "
-              "FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id "
-              "WHERE reaction.user_id = ?", (user_id,))
-    reaction_options = c.fetchall()
+        # Reaction 데이터 가져오기
+        c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, reaction.catalyst_amount, synthesis.name
+                     FROM reaction
+                     JOIN synthesis ON reaction.synthesis_id = synthesis.id
+                     WHERE reaction.user_id = ?""", (user_id,))
+        reaction_options = c.fetchall()
 
-    if reaction_options:
-        reaction_id = st.selectbox(
-            "Select Reaction",
-            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
-        )
+        if reaction_options:
+            reaction_id = st.selectbox(
+                "Select Reaction",
+                [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
+            )
 
-        if reaction_id:
-            selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
-            st.write(f"**Reaction Conditions:**")
-            st.write(f"- Temperature: {selected_reaction[2]}°C")
-            st.write(f"- Pressure: {selected_reaction[3]} atm")
-            st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
-            st.write(f"- Catalyst Name: {selected_reaction[5]}")
+            if reaction_id:
+                selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
+                st.write(f"**Reaction Conditions:**")
+                st.write(f"- Temperature: {selected_reaction[2]}°C")
+                st.write(f"- Pressure: {selected_reaction[3]} atm")
+                st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
+                st.write(f"- Catalyst Name: {selected_reaction[5]}")
 
-            # 엑셀 파일 업로드
-            uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
+                # 엑셀 파일 업로드
+                uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
 
-            if uploaded_file:
-                # 데이터 읽기
-                if uploaded_file.name.endswith(".xlsx"):
-                    data = pd.read_excel(uploaded_file)
-                else:
-                    data = pd.read_csv(uploaded_file)
+                if uploaded_file:
+                    # 데이터 읽기
+                    data = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
 
-                st.subheader("Uploaded Data")
-                st.write(data.head())
+                    st.subheader("Uploaded Data")
+                    st.write(data.head())
 
-                # 데이터 검증 및 그래프 생성
-                if 'Time' in data.columns and 'DoDH' in data.columns:
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
-                    plt.xlabel("Time (min)")
-                    plt.ylabel("DoDH (%)")
-                    plt.title("DoDH over Time")
-                    plt.legend()
-                    st.pyplot(plt)
+                    # 데이터 검증 및 그래프 생성
+                    if 'Time' in data.columns and 'DoDH' in data.columns:
+                        plt.figure(figsize=(10, 6))
+                        plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
+                        plt.xlabel("Time (min)")
+                        plt.ylabel("DoDH (%)")
+                        plt.title("DoDH over Time")
+                        plt.legend()
+                        st.pyplot(plt)
 
-                    # 최대 DoDH 계산 및 저장
-                    max_dodh = data['DoDH'].max()
-                    reaction_id_num = int(reaction_id.split("ID: ")[-1].split(" - ")[0])
-                    c.execute("INSERT INTO results (reaction_id, user_id, time_series, dodh_series, max_dodh) VALUES (?, ?, ?, ?, ?)",
-                              (reaction_id_num, user_id, data['Time'].to_json(), data['DoDH'].to_json(), max_dodh))
-                    conn.commit()
-                    st.metric("Max DoDH (%)", f"{max_dodh:.2f}")
-                else:
-                    st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
-    else:
-        st.write("No reaction data available. Please add reaction data first.")
+                        # 최대 DoDH 계산 및 저장
+                        max_dodh = data['DoDH'].max()
+                        reaction_id_num = int(reaction_id.split("ID: ")[-1].split(" - ")[0])
+                        c.execute("INSERT INTO results (reaction_id, user_id, time_series, dodh_series, max_dodh) VALUES (?, ?, ?, ?, ?)",
+                                  (reaction_id_num, user_id, data['Time'].to_json(), data['DoDH'].to_json(), max_dodh))
+                        conn.commit()
+                        st.metric("Max DoDH (%)", f"{max_dodh:.2f}")
+                    else:
+                        st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
+        else:
+            st.write("No reaction data available. Please add reaction data first.")
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+
 
 # 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
     st.experimental_rerun()
+
+
+# 로그인 페이지 (예제)
+def login():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username and password:
+            c.execute("SELECT id FROM users WHERE username = ? AND password = ?", (username, password))
+            user = c.fetchone()
+            if user:
+                st.session_state['logged_in'] = True
+                st.session_state['user_id'] = user[0]
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+
+
+# 회원가입 페이지 (예제)
+def signup():
+    st.header("Sign Up")
+    username = st.text_input("Create Username")
+    password = st.text_input("Create Password", type="password")
+
+    if st.button("Sign Up"):
+        if username and password:
+            try:
+                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+                conn.commit()
+                st.success("Account created! Please log in.")
+                st.experimental_rerun()
+            except sqlite3.IntegrityError:
+                st.error("Username already exists")
+
+
+# 합성 섹션 (예제)
+def synthesis_section():
+    st.header("Synthesis Section")
+    st.write("Add your synthesis data here.")
+
+
+# 반응 섹션 (예제)
+def reaction_section():
+    st.header("Reaction Section")
+    st.write("Add your reaction data here.")
+
 
 # 앱 상태 관리
 if 'logged_in' not in st.session_state:
@@ -133,7 +184,6 @@ if st.session_state['logged_in']:
     elif section == "Results":
         result_section()
 
-    # 로그아웃 버튼 (왼쪽 아래)
     with st.sidebar:
         st.button("Logout", on_click=logout)
 else:
