@@ -228,7 +228,7 @@ def result_section():
                             st.warning("Filtered data is empty. Please check your input file.")
                         else:
                             # 평균 DoDH 계산
-                            average_dodh = filtered_data['DoDH(%)'].mean()
+                            average_dodh = filtered_data['DoDH(%)'].replace([np.inf, -np.inf], np.nan).dropna().mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
                             # 그래프 생성
