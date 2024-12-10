@@ -5,16 +5,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from hashlib import sha256
 
+# NumPy 2.0 이상 호환: np.Inf를 np.inf로 재정의
+np.Inf = np.inf
 
 # 데이터베이스 연결 함수
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
 
-
 # 비밀번호 해싱 함수
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
-
 
 # 데이터베이스 초기화 함수
 def initialize_database():
@@ -63,18 +63,15 @@ def initialize_database():
     conn.commit()
     conn.close()
 
-
 # 팝업 메시지 함수
 def show_popup(message):
     st.session_state['popup_message'] = message
-
 
 def display_popup():
     if 'popup_message' in st.session_state and st.session_state['popup_message']:
         st.info(st.session_state['popup_message'])
         if st.button("확인"):
             st.session_state['popup_message'] = ""
-
 
 # 회원가입 페이지
 def signup():
@@ -97,7 +94,6 @@ def signup():
         else:
             st.error("모든 필드를 채워주세요.")
 
-
 # 로그인 페이지
 def login():
     st.header("Login")
@@ -108,7 +104,6 @@ def login():
         if username and password:
             conn = get_connection()
             c = conn.cursor()
-
             c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
             user = c.fetchone()
 
@@ -123,13 +118,11 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
-
 # 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
     st.session_state['page'] = "Login"
-
 
 # 합성 데이터 입력 섹션
 def synthesis_section():
@@ -152,7 +145,6 @@ def synthesis_section():
         else:
             st.error("모든 필드를 채워주세요.")
     conn.close()
-
 
 # 반응 데이터 입력 섹션
 def reaction_section():
@@ -184,7 +176,6 @@ def reaction_section():
     else:
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
-
 
 # 결과 데이터 및 시각화
 def result_section():
@@ -224,12 +215,14 @@ def result_section():
                         # "Time on stream (h)" 기준으로 1 이상 필터링
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
-                        # 데이터가 비어있는지 확인
                         if filtered_data.empty:
                             st.warning("Filtered data is empty. Please check your input file.")
                         else:
-                            # 평균 DoDH 계산 (최신 NumPy 사용)
-                            filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].replace([np.inf, -np.inf], np.nan).dropna()
+                            filtered_data['DoDH(%)'] = (
+                                filtered_data['DoDH(%)']
+                                .replace([np.inf, -np.inf], np.nan)
+                                .dropna()
+                            )
                             average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
@@ -250,13 +243,10 @@ def result_section():
                         st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
-                    print(e)  # 로그 확인용
+                    print("Error Details:", e)
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
-
-
-
 
 # 데이터 보기 및 삭제
 def view_data_section():
@@ -292,8 +282,6 @@ def view_data_section():
 
     conn.close()
 
-
-
 def main():
     initialize_database()
     display_popup()
@@ -308,7 +296,6 @@ def main():
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
         section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
-
         st.session_state['page'] = section
 
         if section == "Synthesis":
@@ -326,7 +313,6 @@ def main():
             login()
         elif st.session_state['page'] == "Sign Up":
             signup()
-
 
 if __name__ == "__main__":
     main()
