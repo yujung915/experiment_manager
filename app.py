@@ -209,35 +209,42 @@ def result_section():
             uploaded_file = st.file_uploader("Upload Result Data (Excel)", type=["xlsx"])
 
             if uploaded_file:
-                data = pd.read_excel(uploaded_file)
+                try:
+                    # 데이터 읽기
+                    data = pd.read_excel(uploaded_file, engine="openpyxl")
 
-                # 데이터가 올바른지 확인
-                if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
-                    # 필터링된 데이터
-                    filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
+                    # 필요한 컬럼 확인 및 필터링
+                    if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
+                        filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
 
-                    st.subheader("Uploaded Data Preview")
-                    st.write(filtered_data.head())
+                        st.subheader("Uploaded Data Preview")
+                        st.write(filtered_data.head())
 
-                    # "Time on stream (h)" 기준으로 1 이상 필터링
-                    filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
+                        # "Time on stream (h)" 기준으로 1 이상 필터링
+                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
-                    # 평균 DoDH 계산 (옵션)
-                    if not filtered_data.empty:
-                        average_dodh = filtered_data['DoDH(%)'].mean()
-                        st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
+                        # 데이터가 비어있는지 확인
+                        if filtered_data.empty:
+                            st.warning("Filtered data is empty. Please check your input file.")
+                        else:
+                            # 평균 DoDH 계산
+                            average_dodh = filtered_data['DoDH(%)'].mean()
+                            st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                    # 그래프 생성
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'],
-                             marker='o', label="DoDH (%)")
-                    plt.xlabel("Time on stream (h)")
-                    plt.ylabel("DoDH (%)")
-                    plt.title("DoDH (%) over Time on stream (h)")
-                    plt.legend()
-                    st.pyplot(plt)
-                else:
-                    st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
+                            # 그래프 생성
+                            st.subheader("DoDH (%) Over Time on Stream (h)")
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], 
+                                     marker='o', label="DoDH (%)")
+                            plt.xlabel("Time on stream (h)")
+                            plt.ylabel("DoDH (%)")
+                            plt.title("DoDH (%) vs Time on stream (h)")
+                            plt.legend()
+                            st.pyplot(plt)
+                    else:
+                        st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
