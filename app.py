@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.signal import savgol_filter  # Smoothing 처리를 위한 라이브러리
 from hashlib import sha256
 
 # NumPy 2.0 이상 호환: np.Inf를 np.inf로 재정의
@@ -226,19 +227,37 @@ def result_section():
                             average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            # 그래프 생성
+                            # 원래 그래프 생성
                             st.subheader("DoDH (%) Over Time on Stream (h)")
                             plt.figure(figsize=(10, 6))
                             plt.plot(
                                 filtered_data['Time on stream (h)'].to_numpy(),
                                 filtered_data['DoDH(%)'].to_numpy(),
-                                marker='o', label="DoDH (%)"
+                                marker='o', label="Original DoDH (%)"
                             )
                             plt.xlabel("Time on stream (h)")
                             plt.ylabel("DoDH (%)")
                             plt.title("DoDH (%) vs Time on stream (h)")
                             plt.legend()
                             st.pyplot(plt)
+
+                            # Smoothing 처리 (Savitzky-Golay 필터)
+                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
+
+                            # Smoothing 그래프 생성
+                            st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(
+                                filtered_data['Time on stream (h)'].to_numpy(),
+                                smoothed_dodh,
+                                color='orange', label="Smoothed DoDH (%)"
+                            )
+                            plt.xlabel("Time on stream (h)")
+                            plt.ylabel("DoDH (%)")
+                            plt.title("Smoothed DoDH (%) vs Time on stream (h)")
+                            plt.legend()
+                            st.pyplot(plt)
+
                     else:
                         st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
@@ -247,6 +266,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 # 데이터 보기 및 삭제
 def view_data_section():
