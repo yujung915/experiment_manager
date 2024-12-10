@@ -228,8 +228,9 @@ def result_section():
                         if filtered_data.empty:
                             st.warning("Filtered data is empty. Please check your input file.")
                         else:
-                            # 평균 DoDH 계산
-                            average_dodh = filtered_data['DoDH(%)'].replace([np.inf, -np.inf], np.nan).dropna().mean()
+                            # 평균 DoDH 계산 (float('inf') 사용)
+                            filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].replace([float('inf'), float('-inf')], pd.NA).dropna()
+                            average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
                             # 그래프 생성
@@ -249,9 +250,12 @@ def result_section():
                         st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
+                    # 로그로 에러 출력 (Streamlit 로그에서 확인 가능)
+                    print(e)
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 
 
