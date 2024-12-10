@@ -13,15 +13,9 @@ def hash_password(password):
     return sha256(password.encode()).hexdigest()
 
 # 데이터베이스 초기화 함수
-def initialize_database(reset=False):
+def initialize_database():
     conn = get_connection()
     c = conn.cursor()
-
-    if reset:
-        c.execute("DROP TABLE IF EXISTS users")
-        c.execute("DROP TABLE IF EXISTS synthesis")
-        c.execute("DROP TABLE IF EXISTS reaction")
-        c.execute("DROP TABLE IF EXISTS results")
 
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +37,6 @@ def initialize_database(reset=False):
                     synthesis_id INTEGER,
                     date TEXT,
                     temperature REAL,
-                    pressure REAL,
                     catalyst_amount REAL,
                     memo TEXT,
                     FOREIGN KEY (user_id) REFERENCES users (id),
@@ -63,7 +56,54 @@ def initialize_database(reset=False):
     conn.commit()
     conn.close()
 
-# 합성 섹션
+# 회원가입 함수
+def signup():
+    st.header("Sign Up")
+    username = st.text_input("Create Username")
+    password = st.text_input("Create Password", type="password")
+
+    if st.button("Sign Up"):
+        if username and password:
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
+                conn.commit()
+                conn.close()
+                st.success("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
+            except sqlite3.IntegrityError:
+                st.error("Username already exists.")
+
+# 로그인 함수
+def login():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username and password:
+            conn = get_connection()
+            c = conn.cursor()
+
+            c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
+            user = c.fetchone()
+
+            if user and user[1] == hash_password(password):
+                st.session_state['logged_in'] = True
+                st.session_state['user_id'] = user[0]
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+            conn.close()
+        else:
+            st.error("Please fill in both fields.")
+
+# 로그아웃 기능
+def logout():
+    st.session_state['logged_in'] = False
+    st.session_state['user_id'] = None
+
+# 합성 데이터 입력 섹션
 def synthesis_section():
     st.header("Synthesis Section")
     conn = get_connection()
@@ -85,7 +125,7 @@ def synthesis_section():
             st.error("Please provide all required information.")
     conn.close()
 
-# 반응 섹션
+# 반응 데이터 입력 섹션
 def reaction_section():
     st.header("Reaction Section")
     conn = get_connection()
@@ -96,32 +136,34 @@ def reaction_section():
     synthesis_options = c.fetchall()
 
     if synthesis_options:
-        synthesis_id = st.selectbox("Select Synthesis", [f"ID: {row[0]} - Name: {row[1]}" for row in synthesis_options])
+        synthesis_id = st.selectbox(
+            "Select Synthesis",
+            [f"ID: {row[0]} - Name: {row[1]}" for row in synthesis_options]
+        )
         selected_synthesis = [row for row in synthesis_options if f"ID: {row[0]}" in synthesis_id][0]
 
         date = st.date_input("Date")
         temperature = st.number_input("Temperature (°C)", min_value=0.0)
-        pressure = st.number_input("Pressure (atm)", min_value=0.0)
         catalyst_amount = st.number_input("Catalyst Amount (g)", min_value=0.0)
         memo = st.text_area("Memo")
 
         if st.button("Add Reaction"):
-            c.execute("INSERT INTO reaction (user_id, synthesis_id, date, temperature, pressure, catalyst_amount, memo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (user_id, selected_synthesis[0], str(date), temperature, pressure, catalyst_amount, memo))
+            c.execute("INSERT INTO reaction (user_id, synthesis_id, date, temperature, catalyst_amount, memo) VALUES (?, ?, ?, ?, ?, ?)",
+                      (user_id, selected_synthesis[0], str(date), temperature, catalyst_amount, memo))
             conn.commit()
             st.success("Reaction added!")
     else:
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
 
-# 결과 섹션
+# 결과 데이터 및 시각화
 def result_section():
     st.header("Result Section")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, 
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
                         reaction.catalyst_amount, synthesis.name
                  FROM reaction
                  JOIN synthesis ON reaction.synthesis_id = synthesis.id
@@ -131,78 +173,66 @@ def result_section():
     if reaction_options:
         reaction_id = st.selectbox(
             "Select Reaction",
-            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
+            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[4]}" for row in reaction_options]
         )
 
         if reaction_id:
-            selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
-            st.write(f"**Reaction Conditions:**")
-            st.write(f"- Temperature: {selected_reaction[2]}°C")
-            st.write(f"- Pressure: {selected_reaction[3]} atm")
-            st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
-            st.write(f"- Catalyst Name: {selected_reaction[5]}")
+            uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
+
+            if uploaded_file:
+                data = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
+
+                st.subheader("Uploaded Data")
+                st.write(data.head())
+
+                if 'Time' in data.columns and 'DoDH' in data.columns:
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
+                    plt.xlabel("Time (min)")
+                    plt.ylabel("DoDH (%)")
+                    plt.title("DoDH over Time")
+                    plt.legend()
+                    st.pyplot(plt)
+                else:
+                    st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
-# 로그아웃 기능
-def logout():
-    st.session_state['logged_in'] = False
-    st.session_state['user_id'] = None
-    st.experimental_rerun()
+# 데이터 보기 및 삭제
+def view_data_section():
+    st.header("View All Data")
+    conn = get_connection()
+    c = conn.cursor()
 
-# 로그인 페이지
-def login():
-    st.header("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    user_id = st.session_state.get('user_id', None)
 
-    if st.button("Login"):
-        if username and password:
-            conn = get_connection()
-            c = conn.cursor()
+    # Synthesis Data
+    st.subheader("Synthesis Data")
+    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
+    synthesis_data = c.fetchall()
+    for row in synthesis_data:
+        st.write(f"ID: {row[0]}, Date: {row[1]}, Name: {row[2]}, Amount: {row[4]} g")
+        if st.button(f"Delete Synthesis {row[0]}"):
+            c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+            conn.commit()
+            st.experimental_rerun()
 
-            c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
-            user = c.fetchone()
+    # Reaction Data
+    st.subheader("Reaction Data")
+    c.execute("SELECT id, date, temperature, catalyst_amount, memo FROM reaction WHERE user_id = ?", (user_id,))
+    reaction_data = c.fetchall()
+    for row in reaction_data:
+        st.write(f"ID: {row[0]}, Date: {row[1]}, Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
+        if st.button(f"Delete Reaction {row[0]}"):
+            c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
+            conn.commit()
+            st.experimental_rerun()
 
-            if user and user[1] == hash_password(password):
-                st.session_state['logged_in'] = True
-                st.session_state['user_id'] = user[0]
-                st.success("Logged in successfully!")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid username or password")
-            conn.close()
-        else:
-            st.error("Please fill in both fields.")
-
-# 회원가입 페이지
-def signup():
-    st.header("Sign Up")
-    username = st.text_input("Create Username")
-    password = st.text_input("Create Password", type="password")
-
-    if st.button("Sign Up"):
-        if username and password:
-            try:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
-                conn.commit()
-                conn.close()
-                st.success("Account created! Please log in.")
-                st.experimental_rerun()
-            except sqlite3.IntegrityError:
-                st.error("Username already exists.")
+    conn.close()
 
 # 메인 함수
 def main():
-    reset = st.sidebar.button("Reset Database")
-    if reset:
-        initialize_database(reset=True)
-        st.success("Database reset successfully!")
-        st.stop()
-
     initialize_database()
 
     if 'logged_in' not in st.session_state:
@@ -212,7 +242,7 @@ def main():
 
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "Logout"])
+        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
 
         if section == "Synthesis":
             synthesis_section()
@@ -220,6 +250,8 @@ def main():
             reaction_section()
         elif section == "Results":
             result_section()
+        elif section == "View Data":
+            view_data_section()
         elif section == "Logout":
             logout()
     else:
