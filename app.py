@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hashlib import sha256
 
-# 데이터베이스 연결
+# 데이터베이스 연결 함수
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
 
@@ -12,17 +12,19 @@ def get_connection():
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
 
-# 데이터베이스 초기화
+# 데이터베이스 초기화 함수
 def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
+    # 사용자 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
                     password TEXT
                 )''')
 
+    # 합성 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS synthesis (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -33,6 +35,7 @@ def initialize_database():
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
+    # 반응 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS reaction (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -46,6 +49,7 @@ def initialize_database():
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
 
+    # 결과 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -60,121 +64,110 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+# 로그인 함수
+def login():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username and password:
+            conn = get_connection()
+            c = conn.cursor()
+
+            # 사용자 확인
+            c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
+            user = c.fetchone()
+
+            if user and user[1] == hash_password(password):
+                st.session_state['logged_in'] = True
+                st.session_state['user_id'] = user[0]
+                st.success("Logged in successfully!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+            conn.close()
+        else:
+            st.error("Please fill in both fields.")
+
+# 회원가입 함수
+def signup():
+    st.header("Sign Up")
+    username = st.text_input("Create Username")
+    password = st.text_input("Create Password", type="password")
+
+    if st.button("Sign Up"):
+        if username and password:
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+
+                # 비밀번호 해싱 후 저장
+                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
+                conn.commit()
+                conn.close()
+
+                st.success("Account created! Please log in.")
+                st.experimental_rerun()
+            except sqlite3.IntegrityError:
+                st.error("Username already exists.")
+
 # 결과 섹션
 def result_section():
-    try:
-        st.header("Result Analysis")
-        conn = get_connection()
-        c = conn.cursor()
-
-        user_id = st.session_state.get('user_id', None)
-        c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, 
-                            reaction.catalyst_amount, synthesis.name
-                     FROM reaction
-                     JOIN synthesis ON reaction.synthesis_id = synthesis.id
-                     WHERE reaction.user_id = ?""", (user_id,))
-        reaction_options = c.fetchall()
-
-        if reaction_options:
-            reaction_id = st.selectbox(
-                "Select Reaction",
-                [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
-            )
-
-            if reaction_id:
-                selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
-                st.write(f"**Reaction Conditions:**")
-                st.write(f"- Temperature: {selected_reaction[2]}°C")
-                st.write(f"- Pressure: {selected_reaction[3]} atm")
-                st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
-                st.write(f"- Catalyst Name: {selected_reaction[5]}")
-
-                uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
-
-                if uploaded_file:
-                    data = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
-
-                    st.subheader("Uploaded Data")
-                    st.write(data.head())
-
-                    if 'Time' in data.columns and 'DoDH' in data.columns:
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
-                        plt.xlabel("Time (min)")
-                        plt.ylabel("DoDH (%)")
-                        plt.title("DoDH over Time")
-                        plt.legend()
-                        st.pyplot(plt)
-
-                        max_dodh = data['DoDH'].max()
-                        reaction_id_num = int(reaction_id.split("ID: ")[-1].split(" - ")[0])
-                        c.execute("INSERT INTO results (reaction_id, user_id, time_series, dodh_series, max_dodh) VALUES (?, ?, ?, ?, ?)",
-                                  (reaction_id_num, user_id, data['Time'].to_json(), data['DoDH'].to_json(), max_dodh))
-                        conn.commit()
-                        st.metric("Max DoDH (%)", f"{max_dodh:.2f}")
-                    else:
-                        st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
-        else:
-            st.write("No reaction data available. Please add reaction data first.")
-        conn.close()
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-
-# 비밀번호 변경 섹션
-def change_password():
-    st.header("Change Password")
+    st.header("Result Analysis")
+    conn = get_connection()
+    c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    if not user_id:
-        st.error("You must be logged in to change your password.")
-        return
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, 
+                        reaction.catalyst_amount, synthesis.name
+                 FROM reaction
+                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
+                 WHERE reaction.user_id = ?""", (user_id,))
+    reaction_options = c.fetchall()
 
-    current_password = st.text_input("Current Password", type="password")
-    new_password = st.text_input("New Password", type="password")
-    confirm_password = st.text_input("Confirm New Password", type="password")
+    if reaction_options:
+        reaction_id = st.selectbox(
+            "Select Reaction",
+            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
+        )
 
-    if st.button("Change Password"):
-        if not current_password or not new_password or not confirm_password:
-            st.error("All fields are required.")
-            return
+        if reaction_id:
+            selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
+            st.write(f"**Reaction Conditions:**")
+            st.write(f"- Temperature: {selected_reaction[2]}°C")
+            st.write(f"- Pressure: {selected_reaction[3]} atm")
+            st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
+            st.write(f"- Catalyst Name: {selected_reaction[5]}")
+    else:
+        st.write("No reaction data available. Please add reaction data first.")
+    conn.close()
 
-        if new_password != confirm_password:
-            st.error("New passwords do not match.")
-            return
-
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT password FROM users WHERE id = ?", (user_id,))
-        user = c.fetchone()
-
-        if not user or user[0] != hash_password(current_password):
-            st.error("Current password is incorrect.")
-            return
-
-        c.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), user_id))
-        conn.commit()
-        conn.close()
-        st.success("Password changed successfully!")
+# 로그아웃 기능
+def logout():
+    st.session_state['logged_in'] = False
+    st.session_state['user_id'] = None
+    st.experimental_rerun()
 
 # 메인 함수
 def main():
     initialize_database()
 
+    # 세션 상태 초기화
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'user_id' not in st.session_state:
         st.session_state['user_id'] = None
 
+    # 로그인 상태 확인 및 화면 구성
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "Change Password"])
+        section = st.sidebar.radio("Select Section", ["Results"])
 
         if section == "Results":
             result_section()
-        elif section == "Change Password":
-            change_password()
 
-        st.sidebar.button("Logout", on_click=lambda: st.session_state.update({"logged_in": False, "user_id": None}))
+        st.sidebar.button("Logout", on_click=logout)
     else:
         page = st.sidebar.radio("Choose an option", ["Login", "Sign Up"])
         if page == "Login":
