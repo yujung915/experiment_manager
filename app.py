@@ -13,18 +13,21 @@ def hash_password(password):
     return sha256(password.encode()).hexdigest()
 
 # 데이터베이스 초기화 함수
-def initialize_database():
+def initialize_database(reset=False):
     conn = get_connection()
     c = conn.cursor()
 
-    # 사용자 테이블 생성
+    if reset:
+        c.execute("DROP TABLE IF EXISTS users")
+        c.execute("DROP TABLE IF EXISTS synthesis")
+        c.execute("DROP TABLE IF EXISTS reaction")
+        c.execute("DROP TABLE IF EXISTS results")
+
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
                     password TEXT
                 )''')
-
-    # 합성 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS synthesis (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -34,8 +37,6 @@ def initialize_database():
                     amount REAL,
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
-
-    # 반응 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS reaction (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -48,8 +49,6 @@ def initialize_database():
                     FOREIGN KEY (user_id) REFERENCES users (id),
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
-
-    # 결과 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -75,7 +74,6 @@ def login():
             conn = get_connection()
             c = conn.cursor()
 
-            # 사용자 확인
             c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
             user = c.fetchone()
 
@@ -83,7 +81,10 @@ def login():
                 st.session_state['logged_in'] = True
                 st.session_state['user_id'] = user[0]
                 st.success("Logged in successfully!")
-                st.experimental_rerun()
+                if "rerun" not in st.session_state:
+                    st.session_state["rerun"] = True
+                else:
+                    st.session_state["rerun"] = not st.session_state["rerun"]
             else:
                 st.error("Invalid username or password")
             conn.close()
@@ -101,56 +102,45 @@ def signup():
             try:
                 conn = get_connection()
                 c = conn.cursor()
-
-                # 비밀번호 해싱 후 저장
                 c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
                 conn.commit()
                 conn.close()
-
                 st.success("Account created! Please log in.")
-                st.experimental_rerun()
+                if "rerun" not in st.session_state:
+                    st.session_state["rerun"] = True
+                else:
+                    st.session_state["rerun"] = not st.session_state["rerun"]
             except sqlite3.IntegrityError:
                 st.error("Username already exists.")
-
-# 결과 섹션
-def result_section():
-    st.header("Result Analysis")
-    conn = get_connection()
-    c = conn.cursor()
-
-    user_id = st.session_state.get('user_id', None)
-    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, 
-                        reaction.catalyst_amount, synthesis.name
-                 FROM reaction
-                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
-                 WHERE reaction.user_id = ?""", (user_id,))
-    reaction_options = c.fetchall()
-
-    if reaction_options:
-        reaction_id = st.selectbox(
-            "Select Reaction",
-            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
-        )
-
-        if reaction_id:
-            selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
-            st.write(f"**Reaction Conditions:**")
-            st.write(f"- Temperature: {selected_reaction[2]}°C")
-            st.write(f"- Pressure: {selected_reaction[3]} atm")
-            st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
-            st.write(f"- Catalyst Name: {selected_reaction[5]}")
-    else:
-        st.write("No reaction data available. Please add reaction data first.")
-    conn.close()
 
 # 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
-    st.experimental_rerun()
+    if "rerun" not in st.session_state:
+        st.session_state["rerun"] = True
+    else:
+        st.session_state["rerun"] = not st.session_state["rerun"]
+
+# 합성 섹션
+def synthesis_section():
+    st.header("Synthesis Section")
+    st.write("Synthesis data can be added here.")
+
+# 반응 섹션
+def reaction_section():
+    st.header("Reaction Section")
+    st.write("Reaction data can be added here.")
 
 # 메인 함수
 def main():
+    # 데이터베이스 초기화
+    reset = st.sidebar.button("Reset Database")
+    if reset:
+        initialize_database(reset=True)
+        st.success("Database reset successfully!")
+        st.stop()
+
     initialize_database()
 
     # 세션 상태 초기화
@@ -159,15 +149,16 @@ def main():
     if 'user_id' not in st.session_state:
         st.session_state['user_id'] = None
 
-    # 로그인 상태 확인 및 화면 구성
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Results"])
+        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Logout"])
 
-        if section == "Results":
-            result_section()
-
-        st.sidebar.button("Logout", on_click=logout)
+        if section == "Synthesis":
+            synthesis_section()
+        elif section == "Reaction":
+            reaction_section()
+        elif section == "Logout":
+            logout()
     else:
         page = st.sidebar.radio("Choose an option", ["Login", "Sign Up"])
         if page == "Login":
