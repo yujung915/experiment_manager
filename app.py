@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
+import io  # 그래프 저장용
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
@@ -54,9 +55,7 @@ def initialize_database():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
                     user_id INTEGER,
-                    time_series TEXT,
-                    dodh_series TEXT,
-                    max_dodh REAL,
+                    graph BLOB,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
@@ -119,66 +118,17 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
-# 로그아웃 기능
+# 로그아웃 버튼
+def logout_button():
+    if st.button("Logout", key="logout_button"):
+        logout()
+
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
     st.session_state['page'] = "Login"
 
-# 합성 데이터 입력 섹션
-def synthesis_section():
-    st.header("Synthesis Section")
-    conn = get_connection()
-    c = conn.cursor()
-
-    user_id = st.session_state.get('user_id', None)
-    date = st.date_input("Date")
-    name = st.text_input("Catalyst Name")
-    memo = st.text_area("Memo")
-    amount = st.number_input("Amount (g)", min_value=0.0)
-
-    if st.button("Add Synthesis"):
-        if user_id and name:
-            c.execute("INSERT INTO synthesis (user_id, date, name, memo, amount) VALUES (?, ?, ?, ?, ?)",
-                      (user_id, str(date), name, memo, amount))
-            conn.commit()
-            st.success("Synthesis added!")
-        else:
-            st.error("모든 필드를 채워주세요.")
-    conn.close()
-
-# 반응 데이터 입력 섹션
-def reaction_section():
-    st.header("Reaction Section")
-    conn = get_connection()
-    c = conn.cursor()
-
-    user_id = st.session_state.get('user_id', None)
-    c.execute("SELECT id, name FROM synthesis WHERE user_id = ?", (user_id,))
-    synthesis_options = c.fetchall()
-
-    if synthesis_options:
-        synthesis_id = st.selectbox(
-            "Select Synthesis",
-            [f"ID: {row[0]} - Name: {row[1]}" for row in synthesis_options]
-        )
-        selected_synthesis = [row for row in synthesis_options if f"ID: {row[0]}" in synthesis_id][0]
-
-        date = st.date_input("Date")
-        temperature = st.number_input("Temperature (°C)", min_value=0.0)
-        catalyst_amount = st.number_input("Catalyst Amount (g)", min_value=0.0)
-        memo = st.text_area("Memo")
-
-        if st.button("Add Reaction"):
-            c.execute("INSERT INTO reaction (user_id, synthesis_id, date, temperature, catalyst_amount, memo) VALUES (?, ?, ?, ?, ?, ?)",
-                      (user_id, selected_synthesis[0], str(date), temperature, catalyst_amount, memo))
-            conn.commit()
-            st.success("Reaction added!")
-    else:
-        st.error("No synthesis data available. Please add synthesis data first.")
-    conn.close()
-
-# 결과 데이터 및 시각화
+# 결과 데이터 및 그래프 저장
 def result_section():
     st.header("Result Section")
     conn = get_connection()
@@ -227,22 +177,34 @@ def result_section():
                             average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            # 원래 그래프 생성
-                            st.subheader("DoDH (%) Over Time on Stream (h)")
-                            plt.figure(figsize=(10, 6))
-                            plt.plot(
+                            # 그래프 생성 및 저장
+                            fig, ax = plt.subplots(figsize=(10, 6))
+                            ax.plot(
                                 filtered_data['Time on stream (h)'].to_numpy(),
                                 filtered_data['DoDH(%)'].to_numpy(),
                                 marker='o', label="Original DoDH (%)"
                             )
-                            plt.xlabel("Time on stream (h)")
-                            plt.ylabel("DoDH (%)")
-                            plt.title("DoDH (%) vs Time on stream (h)")
-                            plt.legend()
-                            st.pyplot(plt)
+                            ax.set_xlabel("Time on stream (h)")
+                            ax.set_ylabel("DoDH (%)")
+                            ax.set_title("DoDH (%) vs Time on stream (h)")
+                            ax.legend()
+
+                            # 그래프 저장
+                            graph_buffer = io.BytesIO()
+                            plt.savefig(graph_buffer, format='png')
+                            graph_buffer.seek(0)
+
+                            # 결과 테이블에 그래프 저장
+                            c.execute(
+                                "INSERT INTO results (reaction_id, user_id, graph) VALUES (?, ?, ?)",
+                                (reaction_id, user_id, graph_buffer.read())
+                            )
+                            conn.commit()
+
+                            st.pyplot(fig)
 
                             # Smoothing 처리 (Savitzky-Golay 필터)
-                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=50, polyorder=2)
+                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
 
                             # Smoothing 그래프 생성
                             st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
@@ -267,7 +229,7 @@ def result_section():
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
-# 데이터 보기 및 수정/삭제
+# 데이터 보기 및 삭제
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
@@ -286,28 +248,7 @@ def view_data_section():
             if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
                 c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
                 conn.commit()
-                st.success(f"Synthesis ID {row[0]} deleted.")
-                # 데이터 삭제 후 다시 쿼리 실행하여 상태 업데이트
-                st.experimental_set_query_params(refresh="true")
-                conn.close()
-                return view_data_section()
-
-    # Reaction Data
-    st.subheader("Reaction Data")
-    c.execute("SELECT id, date, temperature, catalyst_amount, memo FROM reaction WHERE user_id = ?", (user_id,))
-    reaction_data = c.fetchall()
-
-    for row in reaction_data:
-        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Temperature: {row[2]}°C | Catalyst Amount: {row[3]} g"):
-            st.write(f"Memo: {row[4]}")
-            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
-                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
-                conn.commit()
-                st.success(f"Reaction ID {row[0]} deleted.")
-                # 데이터 삭제 후 다시 쿼리 실행하여 상태 업데이트
-                st.experimental_set_query_params(refresh="true")
-                conn.close()
-                return view_data_section()
+                st.experimental_rerun()
 
     conn.close()
 
@@ -323,9 +264,12 @@ def main():
         st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
+        col1, col2 = st.columns([9, 1])
+        with col2:
+            logout_button()
+
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
-        st.session_state['page'] = section
+        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data"])
 
         if section == "Synthesis":
             synthesis_section()
@@ -335,8 +279,6 @@ def main():
             result_section()
         elif section == "View Data":
             view_data_section()
-        elif section == "Logout":
-            logout()
     else:
         if st.session_state['page'] == "Login":
             login()
