@@ -4,13 +4,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from hashlib import sha256
 
+
 # 데이터베이스 연결 함수
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
 
+
 # 비밀번호 해싱 함수
 def hash_password(password):
     return sha256(password.encode()).hexdigest()
+
 
 # 데이터베이스 초기화 함수
 def initialize_database():
@@ -59,15 +62,18 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+
 # 팝업 메시지 함수
 def show_popup(message):
     st.session_state['popup_message'] = message
+
 
 def display_popup():
     if 'popup_message' in st.session_state and st.session_state['popup_message']:
         st.info(st.session_state['popup_message'])
         if st.button("확인"):
             st.session_state['popup_message'] = ""
+
 
 # 회원가입 페이지
 def signup():
@@ -83,12 +89,13 @@ def signup():
                 c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
                 conn.commit()
                 conn.close()
-                show_popup("회원가입에 성공하였습니다! 로그인 페이지로 이동하세요.")
+                show_popup("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
                 st.session_state['page'] = "Login"
             except sqlite3.IntegrityError:
                 st.error("이미 존재하는 사용자 이름입니다.")
         else:
             st.error("모든 필드를 채워주세요.")
+
 
 # 로그인 페이지
 def login():
@@ -115,11 +122,13 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
+
 # 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
     st.session_state['page'] = "Login"
+
 
 # 합성 데이터 입력 섹션
 def synthesis_section():
@@ -142,6 +151,7 @@ def synthesis_section():
         else:
             st.error("모든 필드를 채워주세요.")
     conn.close()
+
 
 # 반응 데이터 입력 섹션
 def reaction_section():
@@ -174,6 +184,7 @@ def reaction_section():
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
 
+
 # 결과 데이터 및 시각화
 def result_section():
     st.header("Result Section")
@@ -195,27 +206,42 @@ def result_section():
         )
 
         if reaction_id:
-            uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
+            uploaded_file = st.file_uploader("Upload Result Data (Excel)", type=["xlsx"])
 
             if uploaded_file:
-                data = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
+                data = pd.read_excel(uploaded_file)
 
-                st.subheader("Uploaded Data")
-                st.write(data.head())
+                # 데이터가 올바른지 확인
+                if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
+                    # 필터링된 데이터
+                    filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
 
-                if 'Time' in data.columns and 'DoDH' in data.columns:
+                    st.subheader("Uploaded Data Preview")
+                    st.write(filtered_data.head())
+
+                    # "Time on stream (h)" 기준으로 1 이상 필터링
+                    filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
+
+                    # 평균 DoDH 계산 (옵션)
+                    if not filtered_data.empty:
+                        average_dodh = filtered_data['DoDH(%)'].mean()
+                        st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
+
+                    # 그래프 생성
                     plt.figure(figsize=(10, 6))
-                    plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
-                    plt.xlabel("Time (min)")
+                    plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'],
+                             marker='o', label="DoDH (%)")
+                    plt.xlabel("Time on stream (h)")
                     plt.ylabel("DoDH (%)")
-                    plt.title("DoDH over Time")
+                    plt.title("DoDH (%) over Time on stream (h)")
                     plt.legend()
                     st.pyplot(plt)
                 else:
-                    st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
+                    st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 # 데이터 보기 및 삭제
 def view_data_section():
@@ -249,7 +275,7 @@ def view_data_section():
 
     conn.close()
 
-# 메인 함수
+
 def main():
     initialize_database()
     display_popup()
@@ -282,6 +308,7 @@ def main():
             login()
         elif st.session_state['page'] == "Sign Up":
             signup()
+
 
 if __name__ == "__main__":
     main()
