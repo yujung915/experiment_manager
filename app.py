@@ -20,6 +20,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS synthesis (
                 date TEXT,
                 name TEXT,
                 memo TEXT,
+                amount REAL,  -- 생성된 촉매의 양
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )''')
 
@@ -30,6 +31,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS reaction (
                 date TEXT,
                 temperature REAL,
                 pressure REAL,
+                catalyst_amount REAL,  -- 반응에 사용된 촉매 양
                 memo TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id),
                 FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
@@ -48,56 +50,65 @@ c.execute('''CREATE TABLE IF NOT EXISTS results (
 
 conn.commit()
 
-# 결과 데이터 업로드 및 해석
+# 결과 섹션
 def result_section():
     st.header("Result Analysis")
 
     # Reaction 데이터 가져오기
     user_id = st.session_state['user_id']
-    c.execute("SELECT id, date, temperature FROM reaction WHERE user_id = ?", (user_id,))
+    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.pressure, reaction.catalyst_amount, synthesis.name "
+              "FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id "
+              "WHERE reaction.user_id = ?", (user_id,))
     reaction_options = c.fetchall()
-    reaction_id = st.selectbox(
-        "Select Reaction (ID + Date + Temperature)",
-        [f"ID: {row[0]} - {row[1]} - {row[2]}°C" for row in reaction_options]
-    )
 
-    # 엑셀 파일 업로드
-    uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
+    if reaction_options:
+        reaction_id = st.selectbox(
+            "Select Reaction",
+            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[5]}" for row in reaction_options]
+        )
 
-    if uploaded_file:
-        # 데이터 읽기
-        if uploaded_file.name.endswith(".xlsx"):
-            data = pd.read_excel(uploaded_file)
-        else:
-            data = pd.read_csv(uploaded_file)
+        if reaction_id:
+            selected_reaction = [row for row in reaction_options if f"ID: {row[0]}" in reaction_id][0]
+            st.write(f"**Reaction Conditions:**")
+            st.write(f"- Temperature: {selected_reaction[2]}°C")
+            st.write(f"- Pressure: {selected_reaction[3]} atm")
+            st.write(f"- Catalyst Amount: {selected_reaction[4]} g")
+            st.write(f"- Catalyst Name: {selected_reaction[5]}")
 
-        st.subheader("Uploaded Data")
-        st.write(data.head())
+            # 엑셀 파일 업로드
+            uploaded_file = st.file_uploader("Upload Result Data (Excel or CSV)", type=["xlsx", "csv"])
 
-        # 그래프 생성
-        st.subheader("DoDH Analysis")
-        if 'Time' in data.columns and 'DoDH' in data.columns:
-            # 데이터 시각화
-            plt.figure(figsize=(10, 6))
-            plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
-            plt.xlabel("Time (min)")
-            plt.ylabel("DoDH (%)")
-            plt.title("DoDH over Time")
-            plt.legend()
-            st.pyplot(plt)
+            if uploaded_file:
+                # 데이터 읽기
+                if uploaded_file.name.endswith(".xlsx"):
+                    data = pd.read_excel(uploaded_file)
+                else:
+                    data = pd.read_csv(uploaded_file)
 
-            # 최대 DoDH 계산
-            max_dodh = data['DoDH'].max()
-            st.metric("Max DoDH (%)", f"{max_dodh:.2f}")
+                st.subheader("Uploaded Data")
+                st.write(data.head())
 
-            # 데이터 저장
-            reaction_id_num = int(reaction_id.split("ID: ")[-1].split(" - ")[0])
-            c.execute("INSERT INTO results (reaction_id, user_id, time_series, dodh_series, max_dodh) VALUES (?, ?, ?, ?, ?)",
-                      (reaction_id_num, user_id, data['Time'].to_json(), data['DoDH'].to_json(), max_dodh))
-            conn.commit()
-            st.success("Result data saved successfully!")
-        else:
-            st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
+                # 데이터 검증 및 그래프 생성
+                if 'Time' in data.columns and 'DoDH' in data.columns:
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(data['Time'], data['DoDH'], marker='o', label="DoDH (%)")
+                    plt.xlabel("Time (min)")
+                    plt.ylabel("DoDH (%)")
+                    plt.title("DoDH over Time")
+                    plt.legend()
+                    st.pyplot(plt)
+
+                    # 최대 DoDH 계산 및 저장
+                    max_dodh = data['DoDH'].max()
+                    reaction_id_num = int(reaction_id.split("ID: ")[-1].split(" - ")[0])
+                    c.execute("INSERT INTO results (reaction_id, user_id, time_series, dodh_series, max_dodh) VALUES (?, ?, ?, ?, ?)",
+                              (reaction_id_num, user_id, data['Time'].to_json(), data['DoDH'].to_json(), max_dodh))
+                    conn.commit()
+                    st.metric("Max DoDH (%)", f"{max_dodh:.2f}")
+                else:
+                    st.error("Uploaded file must contain 'Time' and 'DoDH' columns.")
+    else:
+        st.write("No reaction data available. Please add reaction data first.")
 
 # 로그아웃 기능
 def logout():
