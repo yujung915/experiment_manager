@@ -3,10 +3,10 @@ import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import savgol_filter  # Smoothing 처리를 위한 라이브러리
+from scipy.signal import savgol_filter
 from hashlib import sha256
 
-# NumPy 2.0 이상 호환: np.Inf를 np.inf로 재정의
+# NumPy 2.0 이상 호환
 np.Inf = np.inf
 
 # 데이터베이스 연결 함수
@@ -267,8 +267,7 @@ def result_section():
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
-
-# 데이터 보기 및 삭제
+# 데이터 보기 및 수정/삭제
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
@@ -283,9 +282,11 @@ def view_data_section():
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
             st.write(f"Memo: {row[3]}")
+            # 삭제 기능
             if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
                 c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
                 conn.commit()
+                st.experimental_set_query_params(action="refresh")
                 st.experimental_rerun()
 
     # Reaction Data
@@ -295,9 +296,11 @@ def view_data_section():
     for row in reaction_data:
         with st.expander(f"ID: {row[0]} | Date: {row[1]} | Temperature: {row[2]}°C | Catalyst Amount: {row[3]} g"):
             st.write(f"Memo: {row[4]}")
+            # 삭제 기능
             if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
                 c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
                 conn.commit()
+                st.experimental_set_query_params(action="refresh")
                 st.experimental_rerun()
 
     conn.close()
