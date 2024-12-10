@@ -22,6 +22,7 @@ def initialize_database():
                     username TEXT UNIQUE,
                     password TEXT
                 )''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS synthesis (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -31,6 +32,7 @@ def initialize_database():
                     amount REAL,
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS reaction (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -42,6 +44,7 @@ def initialize_database():
                     FOREIGN KEY (user_id) REFERENCES users (id),
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -56,7 +59,17 @@ def initialize_database():
     conn.commit()
     conn.close()
 
-# 회원가입 함수
+# 팝업 메시지 함수
+def show_popup(message):
+    st.session_state['popup_message'] = message
+
+def display_popup():
+    if 'popup_message' in st.session_state and st.session_state['popup_message']:
+        st.info(st.session_state['popup_message'])
+        if st.button("확인"):
+            st.session_state['popup_message'] = ""
+
+# 회원가입 페이지
 def signup():
     st.header("Sign Up")
     username = st.text_input("Create Username")
@@ -70,11 +83,14 @@ def signup():
                 c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
                 conn.commit()
                 conn.close()
-                st.success("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
+                show_popup("회원가입에 성공하였습니다! 로그인 페이지로 이동하세요.")
+                st.session_state['page'] = "Login"
             except sqlite3.IntegrityError:
-                st.error("Username already exists.")
+                st.error("이미 존재하는 사용자 이름입니다.")
+        else:
+            st.error("모든 필드를 채워주세요.")
 
-# 로그인 함수
+# 로그인 페이지
 def login():
     st.header("Login")
     username = st.text_input("Username")
@@ -91,17 +107,19 @@ def login():
             if user and user[1] == hash_password(password):
                 st.session_state['logged_in'] = True
                 st.session_state['user_id'] = user[0]
-                st.experimental_rerun()
+                st.session_state['page'] = "Synthesis"
+                st.success("로그인 성공!")
             else:
-                st.error("Invalid username or password")
+                st.error("사용자 이름 또는 비밀번호가 올바르지 않습니다.")
             conn.close()
         else:
-            st.error("Please fill in both fields.")
+            st.error("모든 필드를 채워주세요.")
 
 # 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
+    st.session_state['page'] = "Login"
 
 # 합성 데이터 입력 섹션
 def synthesis_section():
@@ -122,7 +140,7 @@ def synthesis_section():
             conn.commit()
             st.success("Synthesis added!")
         else:
-            st.error("Please provide all required information.")
+            st.error("모든 필드를 채워주세요.")
     conn.close()
 
 # 반응 데이터 입력 섹션
@@ -234,15 +252,20 @@ def view_data_section():
 # 메인 함수
 def main():
     initialize_database()
+    display_popup()
 
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
     if 'user_id' not in st.session_state:
         st.session_state['user_id'] = None
+    if 'page' not in st.session_state:
+        st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
         section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
+
+        st.session_state['page'] = section
 
         if section == "Synthesis":
             synthesis_section()
@@ -255,10 +278,9 @@ def main():
         elif section == "Logout":
             logout()
     else:
-        page = st.sidebar.radio("Choose an option", ["Login", "Sign Up"])
-        if page == "Login":
+        if st.session_state['page'] == "Login":
             login()
-        elif page == "Sign Up":
+        elif st.session_state['page'] == "Sign Up":
             signup()
 
 if __name__ == "__main__":
