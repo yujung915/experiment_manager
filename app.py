@@ -242,7 +242,7 @@ def result_section():
                             st.pyplot(plt)
 
                             # Smoothing 처리 (Savitzky-Golay 필터)
-                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
+                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=50, polyorder=2)
 
                             # Smoothing 그래프 생성
                             st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
