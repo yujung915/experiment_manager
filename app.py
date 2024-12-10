@@ -267,24 +267,27 @@ def view_data_section():
     c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
     for row in synthesis_data:
-        st.write(f"ID: {row[0]}, Date: {row[1]}, Name: {row[2]}, Amount: {row[4]} g")
-        if st.button(f"Delete Synthesis {row[0]}"):
-            c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-            conn.commit()
-            st.experimental_rerun()
+        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
+            st.write(f"Memo: {row[3]}")
+            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
+                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
 
     # Reaction Data
     st.subheader("Reaction Data")
     c.execute("SELECT id, date, temperature, catalyst_amount, memo FROM reaction WHERE user_id = ?", (user_id,))
     reaction_data = c.fetchall()
     for row in reaction_data:
-        st.write(f"ID: {row[0]}, Date: {row[1]}, Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
-        if st.button(f"Delete Reaction {row[0]}"):
-            c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
-            conn.commit()
-            st.experimental_rerun()
+        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Temperature: {row[2]}°C | Catalyst Amount: {row[3]} g"):
+            st.write(f"Memo: {row[4]}")
+            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
+                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
 
     conn.close()
+
 
 
 def main():
