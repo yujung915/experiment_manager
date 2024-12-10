@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 from hashlib import sha256
 
 
