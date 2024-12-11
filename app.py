@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
-import io
-from PIL import Image
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
@@ -56,7 +54,9 @@ def initialize_database():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
                     user_id INTEGER,
-                    graph BLOB,
+                    time_series TEXT,
+                    dodh_series TEXT,
+                    max_dodh REAL,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
@@ -125,80 +125,56 @@ def logout():
     st.session_state['user_id'] = None
     st.session_state['page'] = "Login"
 
-# 결과 데이터 및 시각화 (그래프 저장 포함)
-def result_section():
-    st.header("Result Section")
+# 합성 데이터 입력 섹션
+def synthesis_section():
+    st.header("Synthesis Section")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
-                        reaction.catalyst_amount, synthesis.name
-                 FROM reaction
-                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
-                 WHERE reaction.user_id = ?""", (user_id,))
-    reaction_options = c.fetchall()
+    if user_id is None:
+        st.error("로그인이 필요합니다. 로그인 후 이용해주세요.")
+        return
 
-    if reaction_options:
-        reaction_id = st.selectbox(
-            "Select Reaction",
-            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[4]}" for row in reaction_options]
-        )
+    date = st.date_input("Date")
+    name = st.text_input("Catalyst Name")
+    memo = st.text_area("Memo")
+    amount = st.number_input("Amount (g)", min_value=0.0)
 
-        if reaction_id:
-            uploaded_file = st.file_uploader("Upload Result Data (Excel)", type=["xlsx"])
-
-            if uploaded_file:
-                try:
-                    # 데이터 읽기
-                    data = pd.read_excel(uploaded_file, engine="openpyxl")
-
-                    if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
-                        filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
-
-                        if not filtered_data.empty:
-                            plt.figure(figsize=(10, 6))
-                            plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], marker='o')
-                            plt.xlabel("Time on stream (h)")
-                            plt.ylabel("DoDH (%)")
-                            plt.title("DoDH (%) vs Time on Stream (h)")
-                            plt.legend()
-
-                            # 그래프 저장
-                            buf = io.BytesIO()
-                            plt.savefig(buf, format='png')
-                            buf.seek(0)
-
-                            c.execute("INSERT INTO results (reaction_id, user_id, graph) VALUES (?, ?, ?)",
-                                      (reaction_id, user_id, buf.read()))
-                            conn.commit()
-                            st.success("Graph saved to database.")
-                        else:
-                            st.warning("Filtered data is empty.")
-                    else:
-                        st.error("Required columns not found in file.")
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
-    else:
-        st.error("No reaction data available.")
+    if st.button("Add Synthesis"):
+        if name:
+            c.execute("INSERT INTO synthesis (user_id, date, name, memo, amount) VALUES (?, ?, ?, ?, ?)",
+                      (user_id, str(date), name, memo, amount))
+            conn.commit()
+            st.success("Synthesis added!")
+        else:
+            st.error("모든 필드를 채워주세요.")
     conn.close()
 
-# 데이터 보기 및 수정/삭제
+# 데이터 보기 및 삭제
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
-    data = c.fetchall()
+    if user_id is None:
+        st.error("로그인이 필요합니다. 로그인 후 이용해주세요.")
+        return
 
-    for row in data:
-        if st.button(f"Delete Synthesis {row[0]}", key=f"delete_{row[0]}"):
-            c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-            conn.commit()
-            st.experimental_rerun()
+    # Synthesis Data
+    st.subheader("Synthesis Data")
+    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
+    synthesis_data = c.fetchall()
+
+    for row in synthesis_data:
+        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
+            st.write(f"Memo: {row[3]}")
+            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
+                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+                conn.commit()
+                st.success(f"Synthesis ID {row[0]} deleted.")
+                st.experimental_rerun()
     conn.close()
 
 def main():
@@ -213,21 +189,16 @@ def main():
         st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
-        col1, col2 = st.columns([9, 1])
-        with col2:
-            if st.button("Logout"):
-                logout()
-
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data"])
+        section = st.sidebar.radio("Select Section", ["Synthesis", "View Data", "Logout"])
+        st.session_state['page'] = section
+
         if section == "Synthesis":
             synthesis_section()
-        elif section == "Reaction":
-            reaction_section()
-        elif section == "Results":
-            result_section()
         elif section == "View Data":
             view_data_section()
+        elif section == "Logout":
+            logout()
     else:
         if st.session_state['page'] == "Login":
             login()
