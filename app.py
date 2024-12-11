@@ -241,10 +241,11 @@ def result_section():
 
             if uploaded_file:
                 try:
-                    # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
+                        filtered_data['Time on stream (h)'] = filtered_data['Time on stream (h)'].to_numpy()
+                        filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].to_numpy()
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
@@ -253,7 +254,7 @@ def result_section():
 
                             # 그래프 생성
                             fig, ax = plt.subplots()
-                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
+                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'], window_length=11, polyorder=2)
                             ax.plot(filtered_data['Time on stream (h)'], smoothed_dodh, label="Smoothed DoDH (%)")
                             ax.set_title("Smoothed DoDH (%) Over Time on Stream")
                             ax.set_xlabel("Time on stream (h)")
@@ -271,6 +272,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 # 데이터 보기 및 결과 확인
 def view_data_section():
