@@ -23,6 +23,7 @@ def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
+    # 기존 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
@@ -55,13 +56,22 @@ def initialize_database():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
                     user_id INTEGER,
-                    file_path TEXT,
+                    time_series TEXT,
+                    dodh_series TEXT,
+                    max_dodh REAL,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
+    # `file_path` 열 추가 확인
+    c.execute("PRAGMA table_info(results)")
+    columns = [info[1] for info in c.fetchall()]
+    if 'file_path' not in columns:
+        c.execute("ALTER TABLE results ADD COLUMN file_path TEXT")
+
     conn.commit()
     conn.close()
+
 
 # 팝업 메시지 함수
 def show_popup(message):
