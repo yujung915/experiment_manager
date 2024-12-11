@@ -68,19 +68,26 @@ def initialize_database():
                     reaction_id INTEGER,
                     user_id INTEGER,
                     graph BLOB,
+                    excel_data BLOB,
                     average_dodh REAL,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
-    # 'results' 테이블에 'graph' 컬럼 추가 (존재하지 않을 경우)
+    # Add missing columns if they don't exist
     try:
-        c.execute("ALTER TABLE results ADD COLUMN graph BLOB")
+        c.execute('ALTER TABLE results ADD COLUMN average_dodh REAL')
     except sqlite3.OperationalError:
-        pass
+        pass  # Column already exists
+
+    try:
+        c.execute('ALTER TABLE results ADD COLUMN graph BLOB')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     conn.commit()
     conn.close()
+
 
 # 팝업 메시지 함수
 def show_popup(message):
