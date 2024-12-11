@@ -12,6 +12,15 @@ np.Inf = np.inf
 # 상징 색깔
 CRIMSON_RED = "#A33B39"
 
+# 초기 세션 상태 설정
+def initialize_session_state():
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+    if 'user_id' not in st.session_state:
+        st.session_state['user_id'] = None
+    if 'page' not in st.session_state:
+        st.session_state['page'] = "Login"
+
 # 데이터베이스 연결 함수
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
@@ -124,9 +133,9 @@ def login():
 
 # 로그아웃 버튼 상단에 추가
 def render_logout():
-    if st.session_state['logged_in']:
+    if st.session_state.get('logged_in', False):  # 기본값 False
         st.markdown(
-            f'<a style="color:white;background-color:{CRIMSON_RED};padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;" href="/" onclick="window.location.reload();">Logout</a>',
+            f'<a style="color:white;background-color:#A33B39;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;" href="/" onclick="window.location.reload();">Logout</a>',
             unsafe_allow_html=True
         )
 
@@ -230,6 +239,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 # 데이터 보기 및 수정/삭제
 def view_data_section():
     st.header("View All Data")
@@ -267,23 +277,16 @@ def view_data_section():
 
 # 메인 함수
 def main():
+    initialize_session_state()
     initialize_database()
     render_logout()
     display_popup()
-
-    if 'logged_in' not in st.session_state:
-        st.session_state['logged_in'] = False
-    if 'user_id' not in st.session_state:
-        st.session_state['user_id'] = None
-    if 'page' not in st.session_state:
-        st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
         section = st.sidebar.radio(
             "",
             ["Synthesis", "Reaction", "Results", "View Data"],
-            format_func=lambda x: x if x != "Logout" else ""
         )
         st.session_state['page'] = section
 
