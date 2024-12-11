@@ -144,6 +144,13 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
+    # 회원가입 버튼 추가
+    st.markdown("---")
+    st.write("계정이 없으신가요?")
+    if st.button("Sign Up"):
+        st.session_state['page'] = "Sign Up"
+
+
 # 로그아웃 버튼 상단에 추가
 def render_logout():
     if st.session_state.get('logged_in', False):  # 기본값 False
@@ -353,6 +360,7 @@ def main():
         elif section == "View Data":
             view_data_section()
     else:
+        # 로그인과 회원가입 페이지 전환
         if st.session_state['page'] == "Login":
             login()
         elif st.session_state['page'] == "Sign Up":
