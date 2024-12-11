@@ -35,6 +35,7 @@ def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
+    # 기존 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
@@ -68,7 +69,6 @@ def initialize_database():
                     reaction_id INTEGER,
                     user_id INTEGER,
                     graph BLOB,
-                    excel_data BLOB,
                     average_dodh REAL,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
@@ -194,18 +194,16 @@ def reaction_section():
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
 
-    # 결과 데이터 및 그래프 저장 함수
+# 결과 데이터 저장 함수
 def save_result_to_db(reaction_id, user_id, graph, average_dodh):
     conn = get_connection()
     c = conn.cursor()
 
-    # 그래프를 BytesIO 객체로 저장
     buffer = BytesIO()
     graph.savefig(buffer, format='png')
     buffer.seek(0)
     graph_data = buffer.read()
 
-    # 결과 저장
     c.execute('''INSERT OR REPLACE INTO results (reaction_id, user_id, graph, average_dodh)
                  VALUES (?, ?, ?, ?)''', (reaction_id, user_id, graph_data, average_dodh))
     conn.commit()
@@ -218,11 +216,7 @@ def result_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
-                        reaction.catalyst_amount, synthesis.name
-                 FROM reaction
-                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
-                 WHERE reaction.user_id = ?""", (user_id,))
+    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
     reaction_options = c.fetchall()
 
     if reaction_options:
@@ -237,30 +231,27 @@ def result_section():
 
             if uploaded_file:
                 try:
-                    # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
-                            # 명시적으로 numpy 배열로 변환
                             time_stream = filtered_data['Time on stream (h)'].to_numpy()
                             dodh = filtered_data['DoDH(%)'].to_numpy()
 
-                            average_dodh = np.mean(dodh)  # 평균 계산
+                            smoothed_dodh = savgol_filter(dodh, window_length=51, polyorder=2)
+                            average_dodh = np.mean(dodh)
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            # 그래프 생성
                             fig, ax = plt.subplots()
-                            ax.plot(time_stream, dodh, label="Original DoDH (%)")
+                            ax.plot(time_stream, smoothed_dodh, label="Smoothed DoDH (%)")
                             ax.set_title("DoDH (%) Over Time on Stream")
                             ax.set_xlabel("Time on stream (h)")
                             ax.set_ylabel("DoDH (%)")
                             ax.legend()
                             st.pyplot(fig)
 
-                            # 결과 저장
                             save_result_to_db(reaction_id, user_id, fig, average_dodh)
                             st.success("Results saved!")
                     else:
@@ -271,9 +262,6 @@ def result_section():
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
-
-
-
 # 데이터 보기 및 결과 확인
 def view_data_section():
     st.header("View All Data")
@@ -281,33 +269,17 @@ def view_data_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-
-    # Synthesis Data
-    st.subheader("Synthesis Data")
-    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
-    synthesis_data = c.fetchall()
-
-    for row in synthesis_data:
-        with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
-            st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
-
-    # Reaction Data and Results
-    st.subheader("Reaction Data")
     c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
     reaction_data = c.fetchall()
 
     for row in reaction_data:
         with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[4]}"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
-
-            # Fetch results for this reaction
             c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
             result = c.fetchone()
-
             if result:
                 st.write(f"Average DoDH: {result[0]:.2f}%")
-                if result[1]:
-                    st.image(result[1], caption="DoDH (%) Graph")
+                st.image(result[1], caption="Smoothed DoDH (%) Graph")
             else:
                 st.warning("No results available for this reaction.")
 
@@ -321,7 +293,6 @@ def main():
     display_popup()
 
     if st.session_state['logged_in']:
-        st.sidebar.title("Navigation")
         section = st.sidebar.radio(
             "",
             ["Synthesis", "Reaction", "Results", "View Data"],
