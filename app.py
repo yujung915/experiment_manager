@@ -26,16 +26,12 @@ def initialize_session_state():
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
 
-# 비밀번호 해싱 함수
-def hash_password(password):
-    return sha256(password.encode()).hexdigest()
-
-# 데이터베이스 초기화 함수
+# 데이터베이스 초기화 및 업데이트 함수
 def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
-    # 기존 테이블 생성
+    # 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
@@ -64,6 +60,7 @@ def initialize_database():
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
 
+    # `results` 테이블 업데이트
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -77,6 +74,10 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+# 비밀번호 해싱 함수
+def hash_password(password):
+    return sha256(password.encode()).hexdigest()
+
 # 팝업 메시지 함수
 def show_popup(message):
     st.session_state['popup_message'] = message
@@ -86,51 +87,6 @@ def display_popup():
         st.info(st.session_state['popup_message'])
         if st.button("확인"):
             st.session_state['popup_message'] = ""
-
-# 회원가입 페이지
-def signup():
-    st.header("Sign Up")
-    username = st.text_input("Create Username")
-    password = st.text_input("Create Password", type="password")
-
-    if st.button("Sign Up"):
-        if username and password:
-            try:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
-                conn.commit()
-                conn.close()
-                show_popup("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
-                st.session_state['page'] = "Login"
-            except sqlite3.IntegrityError:
-                st.error("이미 존재하는 사용자 이름입니다.")
-        else:
-            st.error("모든 필드를 채워주세요.")
-
-# 로그인 페이지
-def login():
-    st.header("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if username and password:
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
-            user = c.fetchone()
-
-            if user and user[1] == hash_password(password):
-                st.session_state['logged_in'] = True
-                st.session_state['user_id'] = user[0]
-                st.session_state['page'] = "Synthesis"
-                st.success("로그인 성공!")
-            else:
-                st.error("사용자 이름 또는 비밀번호가 올바르지 않습니다.")
-            conn.close()
-        else:
-            st.error("모든 필드를 채워주세요.")
 
 # 로그아웃 버튼 상단에 추가
 def render_logout():
@@ -275,11 +231,15 @@ def view_data_section():
     for row in reaction_data:
         with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[4]}"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
+
+            # Fetch results for this reaction
             c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
             result = c.fetchone()
+
             if result:
                 st.write(f"Average DoDH: {result[0]:.2f}%")
-                st.image(result[1], caption="Smoothed DoDH (%) Graph")
+                if result[1]:
+                    st.image(result[1], caption="DoDH (%) Graph", use_column_width=True)
             else:
                 st.warning("No results available for this reaction.")
 
@@ -293,6 +253,7 @@ def main():
     display_popup()
 
     if st.session_state['logged_in']:
+        st.sidebar.title("Navigation")
         section = st.sidebar.radio(
             "",
             ["Synthesis", "Reaction", "Results", "View Data"],
