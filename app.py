@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
-import io  # 그래프 저장용
+import io
+from PIL import Image
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
@@ -118,17 +119,13 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
-# 로그아웃 버튼
-def logout_button():
-    if st.button("Logout", key="logout_button"):
-        logout()
-
+# 로그아웃 기능
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user_id'] = None
     st.session_state['page'] = "Login"
 
-# 결과 데이터 및 그래프 저장
+# 결과 데이터 및 시각화 (그래프 저장 포함)
 def result_section():
     st.header("Result Section")
     conn = get_connection()
@@ -156,100 +153,52 @@ def result_section():
                     # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
 
-                    # 필요한 컬럼 확인 및 필터링
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-
-                        st.subheader("Uploaded Data Preview")
-                        st.write(filtered_data.head())
-
-                        # "Time on stream (h)" 기준으로 1 이상 필터링
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
-                        if filtered_data.empty:
-                            st.warning("Filtered data is empty. Please check your input file.")
-                        else:
-                            filtered_data['DoDH(%)'] = (
-                                filtered_data['DoDH(%)']
-                                .replace([np.inf, -np.inf], np.nan)
-                                .dropna()
-                            )
-                            average_dodh = filtered_data['DoDH(%)'].mean()
-                            st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
-
-                            # 그래프 생성 및 저장
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            ax.plot(
-                                filtered_data['Time on stream (h)'].to_numpy(),
-                                filtered_data['DoDH(%)'].to_numpy(),
-                                marker='o', label="Original DoDH (%)"
-                            )
-                            ax.set_xlabel("Time on stream (h)")
-                            ax.set_ylabel("DoDH (%)")
-                            ax.set_title("DoDH (%) vs Time on stream (h)")
-                            ax.legend()
-
-                            # 그래프 저장
-                            graph_buffer = io.BytesIO()
-                            plt.savefig(graph_buffer, format='png')
-                            graph_buffer.seek(0)
-
-                            # 결과 테이블에 그래프 저장
-                            c.execute(
-                                "INSERT INTO results (reaction_id, user_id, graph) VALUES (?, ?, ?)",
-                                (reaction_id, user_id, graph_buffer.read())
-                            )
-                            conn.commit()
-
-                            st.pyplot(fig)
-
-                            # Smoothing 처리 (Savitzky-Golay 필터)
-                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
-
-                            # Smoothing 그래프 생성
-                            st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
+                        if not filtered_data.empty:
                             plt.figure(figsize=(10, 6))
-                            plt.plot(
-                                filtered_data['Time on stream (h)'].to_numpy(),
-                                smoothed_dodh,
-                                color='orange', label="Smoothed DoDH (%)"
-                            )
+                            plt.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], marker='o')
                             plt.xlabel("Time on stream (h)")
                             plt.ylabel("DoDH (%)")
-                            plt.title("Smoothed DoDH (%) vs Time on stream (h)")
+                            plt.title("DoDH (%) vs Time on Stream (h)")
                             plt.legend()
-                            st.pyplot(plt)
 
+                            # 그래프 저장
+                            buf = io.BytesIO()
+                            plt.savefig(buf, format='png')
+                            buf.seek(0)
+
+                            c.execute("INSERT INTO results (reaction_id, user_id, graph) VALUES (?, ?, ?)",
+                                      (reaction_id, user_id, buf.read()))
+                            conn.commit()
+                            st.success("Graph saved to database.")
+                        else:
+                            st.warning("Filtered data is empty.")
                     else:
-                        st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
+                        st.error("Required columns not found in file.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
-                    print("Error Details:", e)
     else:
-        st.error("No reaction data available. Please add reaction data first.")
+        st.error("No reaction data available.")
     conn.close()
 
-# 데이터 보기 및 삭제
+# 데이터 보기 및 수정/삭제
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
+    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
+    data = c.fetchall()
 
-    # Synthesis Data
-    st.subheader("Synthesis Data")
-    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
-    synthesis_data = c.fetchall()
-
-    for row in synthesis_data:
-        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
-            st.write(f"Memo: {row[3]}")
-            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
-                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-                conn.commit()
-                st.experimental_rerun()
-
+    for row in data:
+        if st.button(f"Delete Synthesis {row[0]}", key=f"delete_{row[0]}"):
+            c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+            conn.commit()
+            st.experimental_rerun()
     conn.close()
 
 def main():
@@ -266,11 +215,11 @@ def main():
     if st.session_state['logged_in']:
         col1, col2 = st.columns([9, 1])
         with col2:
-            logout_button()
+            if st.button("Logout"):
+                logout()
 
         st.sidebar.title("Navigation")
         section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data"])
-
         if section == "Synthesis":
             synthesis_section()
         elif section == "Reaction":
