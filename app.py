@@ -5,10 +5,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
-import os
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
+
+# 상징 색깔
+CRIMSON_RED = "#A33B39"
 
 # 데이터베이스 연결 함수
 def get_connection():
@@ -23,7 +25,6 @@ def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
-    # 기존 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
@@ -56,22 +57,15 @@ def initialize_database():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
                     user_id INTEGER,
-                    time_series TEXT,
-                    dodh_series TEXT,
-                    max_dodh REAL,
+                    graph BLOB,
+                    excel_data BLOB,
+                    average_dodh REAL,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
-    # `file_path` 열 추가 확인
-    c.execute("PRAGMA table_info(results)")
-    columns = [info[1] for info in c.fetchall()]
-    if 'file_path' not in columns:
-        c.execute("ALTER TABLE results ADD COLUMN file_path TEXT")
-
     conn.commit()
     conn.close()
-
 
 # 팝업 메시지 함수
 def show_popup(message):
@@ -128,12 +122,13 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
-# 로그아웃 버튼
-def logout_button():
-    if st.button("Logout", key="logout_button", help="Log out and return to the login page"):
-        st.session_state['logged_in'] = False
-        st.session_state['user_id'] = None
-        st.session_state['page'] = "Login"
+# 로그아웃 버튼 상단에 추가
+def render_logout():
+    if st.session_state['logged_in']:
+        st.markdown(
+            f'<a style="color:white;background-color:{CRIMSON_RED};padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;" href="/" onclick="window.location.reload();">Logout</a>',
+            unsafe_allow_html=True
+        )
 
 # 합성 데이터 입력 섹션
 def synthesis_section():
@@ -164,15 +159,16 @@ def reaction_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("SELECT id, name FROM synthesis WHERE user_id = ?", (user_id,))
+    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_options = c.fetchall()
 
     if synthesis_options:
         synthesis_id = st.selectbox(
             "Select Synthesis",
-            [f"ID: {row[0]} - Name: {row[1]}" for row in synthesis_options]
+            [f"ID: {row[0]} - Date: {row[1]} - Name: {row[2]}" for row in synthesis_options]
         )
-        selected_synthesis = [row for row in synthesis_options if f"ID: {row[0]}" in synthesis_id][0]
+
+        selected_id = int(synthesis_id.split(" ")[1])  # Extract synthesis ID
 
         date = st.date_input("Date")
         temperature = st.number_input("Temperature (°C)", min_value=0.0)
@@ -181,7 +177,7 @@ def reaction_section():
 
         if st.button("Add Reaction"):
             c.execute("INSERT INTO reaction (user_id, synthesis_id, date, temperature, catalyst_amount, memo) VALUES (?, ?, ?, ?, ?, ?)",
-                      (user_id, selected_synthesis[0], str(date), temperature, catalyst_amount, memo))
+                      (user_id, selected_id, str(date), temperature, catalyst_amount, memo))
             conn.commit()
             st.success("Reaction added!")
     else:
@@ -195,11 +191,7 @@ def result_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
-                        reaction.catalyst_amount, synthesis.name
-                 FROM reaction
-                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
-                 WHERE reaction.user_id = ?""", (user_id,))
+    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
     reaction_options = c.fetchall()
 
     if reaction_options:
@@ -209,63 +201,62 @@ def result_section():
         )
 
         if reaction_id:
+            reaction_id = int(reaction_id.split(" ")[1])  # Extract reaction ID
             uploaded_file = st.file_uploader("Upload Result Data (Excel)", type=["xlsx"])
 
             if uploaded_file:
                 try:
-                    # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
-                    file_path = f"reaction_data_{reaction_id}.xlsx"
-                    data.to_excel(file_path, index=False)
+                    if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
+                        filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
+                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
-                    # 파일 저장 경로를 DB에 기록
-                    c.execute("INSERT INTO results (reaction_id, user_id, file_path) VALUES (?, ?, ?)",
-                              (reaction_id, user_id, file_path))
-                    conn.commit()
+                        if not filtered_data.empty:
+                            average_dodh = filtered_data['DoDH(%)'].mean()
+                            st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                    st.success(f"Data saved to {file_path}!")
-                    st.write("Data uploaded and saved successfully.")
+                            fig, ax = plt.subplots()
+                            ax.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], label="Original DoDH (%)")
+                            ax.set_title("DoDH (%) Over Time")
+                            st.pyplot(fig)
 
+                            conn.close()
+                    else:
+                        st.error("The file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
+# 데이터 보기 및 수정/삭제
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-
-    # Synthesis Data
-    st.subheader("Synthesis Data")
-    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
+    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
 
     for row in synthesis_data:
-        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
-            st.write(f"Memo: {row[3]}")
+        with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
+            st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
 
     conn.close()
 
+# 메인 함수
 def main():
     initialize_database()
+    render_logout()
     display_popup()
 
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
-    if 'user_id' not in st.session_state:
-        st.session_state['user_id'] = None
-    if 'page' not in st.session_state:
-        st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
-        st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data"])
-        st.sidebar.empty()
-        logout_button()
+        section = st.sidebar.radio("", ["Synthesis", "Reaction", "Results", "View Data"],
+                                   format_func=lambda x: x.title())
 
         if section == "Synthesis":
             synthesis_section()
@@ -276,9 +267,9 @@ def main():
         elif section == "View Data":
             view_data_section()
     else:
-        if st.session_state['page'] == "Login":
+        if st.session_state.get('page', "Login") == "Login":
             login()
-        elif st.session_state['page'] == "Sign Up":
+        else:
             signup()
 
 if __name__ == "__main__":
