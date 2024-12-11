@@ -230,7 +230,6 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
-
 # 데이터 보기 및 수정/삭제
 def view_data_section():
     st.header("View All Data")
@@ -241,9 +240,28 @@ def view_data_section():
     c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
 
+    st.subheader("Synthesis Data")
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
             st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
+            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
+                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+                conn.commit()
+                st.success(f"Synthesis ID {row[0]} deleted.")
+                st.experimental_rerun()
+
+    st.subheader("Reaction Data")
+    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
+    reaction_data = c.fetchall()
+
+    for row in reaction_data:
+        with st.expander(f"ID: {row[0]} - Catalyst: {row[4]} ({row[1]})"):
+            st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
+            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
+                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
+                conn.commit()
+                st.success(f"Reaction ID {row[0]} deleted.")
+                st.experimental_rerun()
 
     conn.close()
 
@@ -255,11 +273,20 @@ def main():
 
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
+    if 'user_id' not in st.session_state:
+        st.session_state['user_id'] = None
+    if 'page' not in st.session_state:
+        st.session_state['page'] = "Login"
 
     if st.session_state['logged_in']:
-        section = st.sidebar.radio("", ["Synthesis", "Reaction", "Results", "View Data"],
-                                   format_func=lambda
-                                   format_func=lambda x: x)
+        st.sidebar.title("Navigation")
+        section = st.sidebar.radio(
+            "",
+            ["Synthesis", "Reaction", "Results", "View Data"],
+            format_func=lambda x: x if x != "Logout" else ""
+        )
+        st.session_state['page'] = section
+
         if section == "Synthesis":
             synthesis_section()
         elif section == "Reaction":
@@ -269,7 +296,7 @@ def main():
         elif section == "View Data":
             view_data_section()
     else:
-        if 'page' not in st.session_state or st.session_state['page'] == "Login":
+        if st.session_state['page'] == "Login":
             login()
         elif st.session_state['page'] == "Sign Up":
             signup()
