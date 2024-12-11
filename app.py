@@ -55,9 +55,7 @@ def initialize_database():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
                     user_id INTEGER,
-                    time_series TEXT,
-                    dodh_series TEXT,
-                    max_dodh REAL,
+                    file_path TEXT,
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
@@ -120,11 +118,12 @@ def login():
         else:
             st.error("모든 필드를 채워주세요.")
 
-# 로그아웃 기능
-def logout():
-    st.session_state['logged_in'] = False
-    st.session_state['user_id'] = None
-    st.session_state['page'] = "Login"
+# 로그아웃 버튼
+def logout_button():
+    if st.button("Logout", key="logout_button", help="Log out and return to the login page"):
+        st.session_state['logged_in'] = False
+        st.session_state['user_id'] = None
+        st.session_state['page'] = "Login"
 
 # 합성 데이터 입력 섹션
 def synthesis_section():
@@ -133,17 +132,13 @@ def synthesis_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    if user_id is None:
-        st.error("로그인이 필요합니다. 로그인 후 이용해주세요.")
-        return
-
     date = st.date_input("Date")
     name = st.text_input("Catalyst Name")
     memo = st.text_area("Memo")
     amount = st.number_input("Amount (g)", min_value=0.0)
 
     if st.button("Add Synthesis"):
-        if name:
+        if user_id and name:
             c.execute("INSERT INTO synthesis (user_id, date, name, memo, amount) VALUES (?, ?, ?, ?, ?)",
                       (user_id, str(date), name, memo, amount))
             conn.commit()
@@ -159,10 +154,6 @@ def reaction_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    if user_id is None:
-        st.error("로그인이 필요합니다. 로그인 후 이용해주세요.")
-        return
-
     c.execute("SELECT id, name FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_options = c.fetchall()
 
@@ -189,13 +180,65 @@ def reaction_section():
 
 # 결과 데이터 및 시각화
 def result_section():
-    # 여기에 그래프 저장 로직 추가 및 수정
-    pass
+    st.header("Result Section")
+    conn = get_connection()
+    c = conn.cursor()
 
-# 데이터 보기 및 삭제
+    user_id = st.session_state.get('user_id', None)
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
+                        reaction.catalyst_amount, synthesis.name
+                 FROM reaction
+                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
+                 WHERE reaction.user_id = ?""", (user_id,))
+    reaction_options = c.fetchall()
+
+    if reaction_options:
+        reaction_id = st.selectbox(
+            "Select Reaction",
+            [f"ID: {row[0]} - Date: {row[1]} - Temp: {row[2]}°C - Catalyst: {row[4]}" for row in reaction_options]
+        )
+
+        if reaction_id:
+            uploaded_file = st.file_uploader("Upload Result Data (Excel)", type=["xlsx"])
+
+            if uploaded_file:
+                try:
+                    # 데이터 읽기
+                    data = pd.read_excel(uploaded_file, engine="openpyxl")
+                    file_path = f"reaction_data_{reaction_id}.xlsx"
+                    data.to_excel(file_path, index=False)
+
+                    # 파일 저장 경로를 DB에 기록
+                    c.execute("INSERT INTO results (reaction_id, user_id, file_path) VALUES (?, ?, ?)",
+                              (reaction_id, user_id, file_path))
+                    conn.commit()
+
+                    st.success(f"Data saved to {file_path}!")
+                    st.write("Data uploaded and saved successfully.")
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
+    else:
+        st.error("No reaction data available. Please add reaction data first.")
+    conn.close()
+
 def view_data_section():
-    # 데이터 삭제 관련 로직 추가
-    pass
+    st.header("View All Data")
+    conn = get_connection()
+    c = conn.cursor()
+
+    user_id = st.session_state.get('user_id', None)
+
+    # Synthesis Data
+    st.subheader("Synthesis Data")
+    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
+    synthesis_data = c.fetchall()
+
+    for row in synthesis_data:
+        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
+            st.write(f"Memo: {row[3]}")
+
+    conn.close()
 
 def main():
     initialize_database()
@@ -210,10 +253,9 @@ def main():
 
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
-        st.session_state['page'] = section
-
-        st.sidebar.button("Logout", on_click=logout)
+        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data"])
+        st.sidebar.empty()
+        logout_button()
 
         if section == "Synthesis":
             synthesis_section()
