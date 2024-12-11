@@ -244,12 +244,16 @@ def result_section():
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
-                            average_dodh = filtered_data['DoDH(%)'].mean()
+                            # 명시적으로 numpy 배열로 변환
+                            time_stream = filtered_data['Time on stream (h)'].to_numpy()
+                            dodh = filtered_data['DoDH(%)'].to_numpy()
+
+                            average_dodh = np.mean(dodh)  # 평균 계산
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
                             # 그래프 생성
                             fig, ax = plt.subplots()
-                            ax.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], label="Original DoDH (%)")
+                            ax.plot(time_stream, dodh, label="Original DoDH (%)")
                             ax.set_title("DoDH (%) Over Time on Stream")
                             ax.set_xlabel("Time on stream (h)")
                             ax.set_ylabel("DoDH (%)")
@@ -266,6 +270,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 
 
