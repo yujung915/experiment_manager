@@ -200,7 +200,11 @@ def result_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
+                        reaction.catalyst_amount, synthesis.name
+                 FROM reaction
+                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
+                 WHERE reaction.user_id = ?""", (user_id,))
     reaction_options = c.fetchall()
 
     if reaction_options:
@@ -216,29 +220,63 @@ def result_section():
             if uploaded_file:
                 try:
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
+
+                    # 필요한 컬럼 확인 및 필터링
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-                        filtered_data['Time on stream (h)'] = filtered_data['Time on stream (h)'].to_numpy()
-                        filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].to_numpy()
-                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
+
+                        # NumPy 배열로 변환
+                        time_stream = filtered_data['Time on stream (h)'].to_numpy()
+                        dodh_values = filtered_data['DoDH(%)'].to_numpy()
+
+                        # "Time on stream (h)" 기준으로 1 이상 필터링
+                        mask = time_stream >= 1
+                        filtered_data = filtered_data[mask]
 
                         if not filtered_data.empty:
-                            average_dodh = filtered_data['DoDH(%)'].mean()
+                            average_dodh = dodh_values[mask].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            fig, ax = plt.subplots()
-                            ax.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], label="Original DoDH (%)")
-                            ax.set_title("DoDH (%) Over Time")
-                            st.pyplot(fig)
+                            # 원래 그래프 생성
+                            st.subheader("DoDH (%) Over Time on Stream (h)")
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(
+                                time_stream[mask],
+                                dodh_values[mask],
+                                marker='o', label="Original DoDH (%)"
+                            )
+                            plt.xlabel("Time on stream (h)")
+                            plt.ylabel("DoDH (%)")
+                            plt.title("DoDH (%) vs Time on stream (h)")
+                            plt.legend()
+                            st.pyplot(plt)
 
-                            conn.close()
+                            # Smoothing 처리 (Savitzky-Golay 필터)
+                            smoothed_dodh = savgol_filter(dodh_values[mask], window_length=5, polyorder=2)
+
+                            # Smoothing 그래프 생성
+                            st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(
+                                time_stream[mask],
+                                smoothed_dodh,
+                                color='orange', label="Smoothed DoDH (%)"
+                            )
+                            plt.xlabel("Time on stream (h)")
+                            plt.ylabel("DoDH (%)")
+                            plt.title("Smoothed DoDH (%) vs Time on stream (h)")
+                            plt.legend()
+                            st.pyplot(plt)
+                        else:
+                            st.warning("Filtered data is empty. Please check your input file.")
                     else:
-                        st.error("The file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
+                        st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 # 데이터 보기 및 수정/삭제
 def view_data_section():
