@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
+import os
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
@@ -151,9 +152,9 @@ def synthesis_section():
             st.error("모든 필드를 채워주세요.")
     conn.close()
 
-# 데이터 보기 및 삭제
-def view_data_section():
-    st.header("View All Data")
+# 반응 데이터 입력 섹션
+def reaction_section():
+    st.header("Reaction Section")
     conn = get_connection()
     c = conn.cursor()
 
@@ -162,20 +163,39 @@ def view_data_section():
         st.error("로그인이 필요합니다. 로그인 후 이용해주세요.")
         return
 
-    # Synthesis Data
-    st.subheader("Synthesis Data")
-    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
-    synthesis_data = c.fetchall()
+    c.execute("SELECT id, name FROM synthesis WHERE user_id = ?", (user_id,))
+    synthesis_options = c.fetchall()
 
-    for row in synthesis_data:
-        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
-            st.write(f"Memo: {row[3]}")
-            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
-                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-                conn.commit()
-                st.success(f"Synthesis ID {row[0]} deleted.")
-                st.experimental_rerun()
+    if synthesis_options:
+        synthesis_id = st.selectbox(
+            "Select Synthesis",
+            [f"ID: {row[0]} - Name: {row[1]}" for row in synthesis_options]
+        )
+        selected_synthesis = [row for row in synthesis_options if f"ID: {row[0]}" in synthesis_id][0]
+
+        date = st.date_input("Date")
+        temperature = st.number_input("Temperature (°C)", min_value=0.0)
+        catalyst_amount = st.number_input("Catalyst Amount (g)", min_value=0.0)
+        memo = st.text_area("Memo")
+
+        if st.button("Add Reaction"):
+            c.execute("INSERT INTO reaction (user_id, synthesis_id, date, temperature, catalyst_amount, memo) VALUES (?, ?, ?, ?, ?, ?)",
+                      (user_id, selected_synthesis[0], str(date), temperature, catalyst_amount, memo))
+            conn.commit()
+            st.success("Reaction added!")
+    else:
+        st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
+
+# 결과 데이터 및 시각화
+def result_section():
+    # 여기에 그래프 저장 로직 추가 및 수정
+    pass
+
+# 데이터 보기 및 삭제
+def view_data_section():
+    # 데이터 삭제 관련 로직 추가
+    pass
 
 def main():
     initialize_database()
@@ -190,15 +210,19 @@ def main():
 
     if st.session_state['logged_in']:
         st.sidebar.title("Navigation")
-        section = st.sidebar.radio("Select Section", ["Synthesis", "View Data", "Logout"])
+        section = st.sidebar.radio("Select Section", ["Synthesis", "Reaction", "Results", "View Data", "Logout"])
         st.session_state['page'] = section
+
+        st.sidebar.button("Logout", on_click=logout)
 
         if section == "Synthesis":
             synthesis_section()
+        elif section == "Reaction":
+            reaction_section()
+        elif section == "Results":
+            result_section()
         elif section == "View Data":
             view_data_section()
-        elif section == "Logout":
-            logout()
     else:
         if st.session_state['page'] == "Login":
             login()
