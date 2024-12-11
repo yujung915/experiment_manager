@@ -244,18 +244,24 @@ def result_section():
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-                        filtered_data['Time on stream (h)'] = filtered_data['Time on stream (h)'].to_numpy()
-                        filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].to_numpy()
-                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
-                        if not filtered_data.empty:
-                            average_dodh = filtered_data['DoDH(%)'].mean()
+                        # 명시적으로 Numpy 배열로 변환
+                        time_on_stream = filtered_data['Time on stream (h)'].to_numpy()
+                        dodh = filtered_data['DoDH(%)'].to_numpy()
+
+                        # 시간 기준 필터링
+                        valid_indices = time_on_stream >= 1
+                        time_on_stream = time_on_stream[valid_indices]
+                        dodh = dodh[valid_indices]
+
+                        if len(time_on_stream) > 0 and len(dodh) > 0:
+                            average_dodh = dodh.mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            # 그래프 생성
+                            # 그래프 생성 (스무딩 포함)
+                            smoothed_dodh = savgol_filter(dodh, window_length=11, polyorder=2)
                             fig, ax = plt.subplots()
-                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'], window_length=11, polyorder=2)
-                            ax.plot(filtered_data['Time on stream (h)'], smoothed_dodh, label="Smoothed DoDH (%)")
+                            ax.plot(time_on_stream, smoothed_dodh, label="Smoothed DoDH (%)")
                             ax.set_title("Smoothed DoDH (%) Over Time on Stream")
                             ax.set_xlabel("Time on stream (h)")
                             ax.set_ylabel("DoDH (%)")
@@ -265,6 +271,8 @@ def result_section():
                             # 결과 저장
                             save_result_to_db(reaction_id, user_id, fig, average_dodh)
                             st.success("Results saved!")
+                        else:
+                            st.error("Filtered data is empty after applying time threshold.")
                     else:
                         st.error("The file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
@@ -272,6 +280,7 @@ def result_section():
     else:
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
+
 
 
 # 데이터 보기 및 결과 확인
