@@ -26,12 +26,15 @@ def initialize_session_state():
 def get_connection():
     return sqlite3.connect("experiment_manager.db", check_same_thread=False)
 
-# 데이터베이스 초기화 및 업데이트 함수
+# 비밀번호 해싱 함수
+def hash_password(password):
+    return sha256(password.encode()).hexdigest()
+
+# 데이터베이스 초기화 함수
 def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
-    # 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
@@ -60,7 +63,6 @@ def initialize_database():
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
 
-    # `results` 테이블 업데이트
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -71,12 +73,14 @@ def initialize_database():
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
+    # 'results' 테이블에 'graph' 컬럼 추가 (존재하지 않을 경우)
+    try:
+        c.execute("ALTER TABLE results ADD COLUMN graph BLOB")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
-
-# 비밀번호 해싱 함수
-def hash_password(password):
-    return sha256(password.encode()).hexdigest()
 
 # 팝업 메시지 함수
 def show_popup(message):
@@ -87,6 +91,51 @@ def display_popup():
         st.info(st.session_state['popup_message'])
         if st.button("확인"):
             st.session_state['popup_message'] = ""
+
+# 회원가입 페이지
+def signup():
+    st.header("Sign Up")
+    username = st.text_input("Create Username")
+    password = st.text_input("Create Password", type="password")
+
+    if st.button("Sign Up"):
+        if username and password:
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
+                conn.commit()
+                conn.close()
+                show_popup("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
+                st.session_state['page'] = "Login"
+            except sqlite3.IntegrityError:
+                st.error("이미 존재하는 사용자 이름입니다.")
+        else:
+            st.error("모든 필드를 채워주세요.")
+
+# 로그인 페이지
+def login():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username and password:
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
+            user = c.fetchone()
+
+            if user and user[1] == hash_password(password):
+                st.session_state['logged_in'] = True
+                st.session_state['user_id'] = user[0]
+                st.session_state['page'] = "Synthesis"
+                st.success("로그인 성공!")
+            else:
+                st.error("사용자 이름 또는 비밀번호가 올바르지 않습니다.")
+            conn.close()
+        else:
+            st.error("모든 필드를 채워주세요.")
 
 # 로그아웃 버튼 상단에 추가
 def render_logout():
@@ -149,17 +198,18 @@ def reaction_section():
     else:
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
-
-# 결과 데이터 저장 함수
+# 결과 데이터 및 그래프 저장 함수
 def save_result_to_db(reaction_id, user_id, graph, average_dodh):
     conn = get_connection()
     c = conn.cursor()
 
+    # 그래프를 BytesIO 객체로 저장
     buffer = BytesIO()
     graph.savefig(buffer, format='png')
     buffer.seek(0)
     graph_data = buffer.read()
 
+    # 결과 저장
     c.execute('''INSERT OR REPLACE INTO results (reaction_id, user_id, graph, average_dodh)
                  VALUES (?, ?, ?, ?)''', (reaction_id, user_id, graph_data, average_dodh))
     conn.commit()
@@ -172,7 +222,11 @@ def result_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
-    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, 
+                        reaction.catalyst_amount, synthesis.name
+                 FROM reaction
+                 JOIN synthesis ON reaction.synthesis_id = synthesis.id
+                 WHERE reaction.user_id = ?""", (user_id,))
     reaction_options = c.fetchall()
 
     if reaction_options:
@@ -187,27 +241,27 @@ def result_section():
 
             if uploaded_file:
                 try:
+                    # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
-                            time_stream = filtered_data['Time on stream (h)'].to_numpy()
-                            dodh = filtered_data['DoDH(%)'].to_numpy()
-
-                            smoothed_dodh = savgol_filter(dodh, window_length=51, polyorder=2)
-                            average_dodh = np.mean(dodh)
+                            average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
+                            # 그래프 생성
                             fig, ax = plt.subplots()
-                            ax.plot(time_stream, smoothed_dodh, label="Smoothed DoDH (%)")
-                            ax.set_title("DoDH (%) Over Time on Stream")
+                            smoothed_dodh = savgol_filter(filtered_data['DoDH(%)'].to_numpy(), window_length=11, polyorder=2)
+                            ax.plot(filtered_data['Time on stream (h)'], smoothed_dodh, label="Smoothed DoDH (%)")
+                            ax.set_title("Smoothed DoDH (%) Over Time on Stream")
                             ax.set_xlabel("Time on stream (h)")
                             ax.set_ylabel("DoDH (%)")
                             ax.legend()
                             st.pyplot(fig)
 
+                            # 결과 저장
                             save_result_to_db(reaction_id, user_id, fig, average_dodh)
                             st.success("Results saved!")
                     else:
@@ -225,6 +279,18 @@ def view_data_section():
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
+
+    # Synthesis Data
+    st.subheader("Synthesis Data")
+    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
+    synthesis_data = c.fetchall()
+
+    for row in synthesis_data:
+        with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
+            st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
+
+    # Reaction Data and Results
+    st.subheader("Reaction Data")
     c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
     reaction_data = c.fetchall()
 
@@ -239,7 +305,7 @@ def view_data_section():
             if result:
                 st.write(f"Average DoDH: {result[0]:.2f}%")
                 if result[1]:
-                    st.image(result[1], caption="DoDH (%) Graph", use_column_width=True)
+                    st.image(result[1], caption="Smoothed DoDH (%) Graph")
             else:
                 st.warning("No results available for this reaction.")
 
