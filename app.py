@@ -113,12 +113,19 @@ def signup():
                 c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hash_password(password)))
                 conn.commit()
                 conn.close()
-                show_popup("회원가입에 성공하였습니다. 로그인 페이지로 이동하여 로그인 해주세요.")
-                st.session_state['page'] = "Login"
+                st.success("회원가입에 성공하였습니다. 로그인 페이지로 이동하세요.")
+                st.session_state['page'] = "Login"  # 바로 로그인 페이지로 이동
             except sqlite3.IntegrityError:
                 st.error("이미 존재하는 사용자 이름입니다.")
         else:
             st.error("모든 필드를 채워주세요.")
+
+    # 로그인 버튼 추가
+    st.markdown("---")
+    st.write("이미 계정이 있으신가요?")
+    if st.button("Back to Login"):
+        st.session_state['page'] = "Login"  # 로그인 페이지로 이동
+
 
 # 로그인 페이지
 def login():
