@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 from hashlib import sha256
+from io import BytesIO
 
 # NumPy 2.0 이상 호환
 np.Inf = np.inf
@@ -193,6 +194,23 @@ def reaction_section():
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
 
+    # 결과 데이터 및 그래프 저장 함수
+def save_result_to_db(reaction_id, user_id, graph, average_dodh):
+    conn = get_connection()
+    c = conn.cursor()
+
+    # 그래프를 BytesIO 객체로 저장
+    buffer = BytesIO()
+    graph.savefig(buffer, format='png')
+    buffer.seek(0)
+    graph_data = buffer.read()
+
+    # 결과 저장
+    c.execute('''INSERT OR REPLACE INTO results (reaction_id, user_id, graph, average_dodh)
+                 VALUES (?, ?, ?, ?)''', (reaction_id, user_id, graph_data, average_dodh))
+    conn.commit()
+    conn.close()
+
 # 결과 데이터 및 시각화
 def result_section():
     st.header("Result Section")
@@ -219,58 +237,30 @@ def result_section():
 
             if uploaded_file:
                 try:
+                    # 데이터 읽기
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
-
-                    # 필요한 컬럼 확인 및 필터링
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-
-                        # NumPy 배열로 변환
-                        time_stream = filtered_data['Time on stream (h)'].to_numpy()
-                        dodh_values = filtered_data['DoDH(%)'].to_numpy()
-
-                        # "Time on stream (h)" 기준으로 1 이상 필터링
-                        mask = time_stream >= 1
-                        filtered_data = filtered_data[mask]
+                        filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
-                            average_dodh = dodh_values[mask].mean()
+                            average_dodh = filtered_data['DoDH(%)'].mean()
                             st.metric(label="Average DoDH (%)", value=f"{average_dodh:.2f}")
 
-                            # 원래 그래프 생성
-                            st.subheader("DoDH (%) Over Time on Stream (h)")
-                            plt.figure(figsize=(10, 6))
-                            plt.plot(
-                                time_stream[mask],
-                                dodh_values[mask],
-                                marker='o', label="Original DoDH (%)"
-                            )
-                            plt.xlabel("Time on stream (h)")
-                            plt.ylabel("DoDH (%)")
-                            plt.title("DoDH (%) vs Time on stream (h)")
-                            plt.legend()
-                            st.pyplot(plt)
+                            # 그래프 생성
+                            fig, ax = plt.subplots()
+                            ax.plot(filtered_data['Time on stream (h)'], filtered_data['DoDH(%)'], label="Original DoDH (%)")
+                            ax.set_title("DoDH (%) Over Time on Stream")
+                            ax.set_xlabel("Time on stream (h)")
+                            ax.set_ylabel("DoDH (%)")
+                            ax.legend()
+                            st.pyplot(fig)
 
-                            # Smoothing 처리 (Savitzky-Golay 필터)
-                            smoothed_dodh = savgol_filter(dodh_values[mask], window_length=5, polyorder=2)
-
-                            # Smoothing 그래프 생성
-                            st.subheader("Smoothed DoDH (%) Over Time on Stream (h)")
-                            plt.figure(figsize=(10, 6))
-                            plt.plot(
-                                time_stream[mask],
-                                smoothed_dodh,
-                                color='orange', label="Smoothed DoDH (%)"
-                            )
-                            plt.xlabel("Time on stream (h)")
-                            plt.ylabel("DoDH (%)")
-                            plt.title("Smoothed DoDH (%) vs Time on stream (h)")
-                            plt.legend()
-                            st.pyplot(plt)
-                        else:
-                            st.warning("Filtered data is empty. Please check your input file.")
+                            # 결과 저장
+                            save_result_to_db(reaction_id, user_id, fig, average_dodh)
+                            st.success("Results saved!")
                     else:
-                        st.error("Uploaded file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
+                        st.error("The file must contain 'Time on stream (h)' and 'DoDH(%)' columns.")
                 except Exception as e:
                     st.error(f"An error occurred: {e}")
     else:
@@ -278,38 +268,43 @@ def result_section():
     conn.close()
 
 
-# 데이터 보기 및 수정/삭제
+
+# 데이터 보기 및 결과 확인
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
     c = conn.cursor()
 
     user_id = st.session_state.get('user_id', None)
+
+    # Synthesis Data
+    st.subheader("Synthesis Data")
     c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
 
-    st.subheader("Synthesis Data")
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
             st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
-            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
-                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-                conn.commit()
-                st.success(f"Synthesis ID {row[0]} deleted.")
-                st.experimental_rerun()
 
+    # Reaction Data and Results
     st.subheader("Reaction Data")
     c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
     reaction_data = c.fetchall()
 
     for row in reaction_data:
-        with st.expander(f"ID: {row[0]} - Catalyst: {row[4]} ({row[1]})"):
+        with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[4]}"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
-            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
-                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
-                conn.commit()
-                st.success(f"Reaction ID {row[0]} deleted.")
-                st.experimental_rerun()
+
+            # Fetch results for this reaction
+            c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
+            result = c.fetchone()
+
+            if result:
+                st.write(f"Average DoDH: {result[0]:.2f}%")
+                if result[1]:
+                    st.image(result[1], caption="DoDH (%) Graph")
+            else:
+                st.warning("No results available for this reaction.")
 
     conn.close()
 
