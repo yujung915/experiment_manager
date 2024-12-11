@@ -209,6 +209,8 @@ def result_section():
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
+                        filtered_data['Time on stream (h)'] = filtered_data['Time on stream (h)'].to_numpy()
+                        filtered_data['DoDH(%)'] = filtered_data['DoDH(%)'].to_numpy()
                         filtered_data = filtered_data[filtered_data['Time on stream (h)'] >= 1]
 
                         if not filtered_data.empty:
@@ -256,8 +258,8 @@ def main():
 
     if st.session_state['logged_in']:
         section = st.sidebar.radio("", ["Synthesis", "Reaction", "Results", "View Data"],
-                                   format_func=lambda x: x.title())
-
+                                   format_func=lambda
+                                   format_func=lambda x: x)
         if section == "Synthesis":
             synthesis_section()
         elif section == "Reaction":
@@ -267,9 +269,9 @@ def main():
         elif section == "View Data":
             view_data_section()
     else:
-        if st.session_state.get('page', "Login") == "Login":
+        if 'page' not in st.session_state or st.session_state['page'] == "Login":
             login()
-        else:
+        elif st.session_state['page'] == "Sign Up":
             signup()
 
 if __name__ == "__main__":
