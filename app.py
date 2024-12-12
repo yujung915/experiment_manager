@@ -328,9 +328,7 @@ def view_data_section():
         c.execute("DELETE FROM synthesis WHERE id = ?", (synthesis_id,))
     if synthesis_ids_to_delete:
         conn.commit()
-        st.experimental_set_query_params(refresh="true")
-        st.success(f"Deleted synthesis ID(s): {', '.join(map(str, synthesis_ids_to_delete))}")
-        return  # 다시 로드
+        st.experimental_rerun()  # 새로고침
 
     # Reaction Data
     st.subheader("Reaction Data")
@@ -345,19 +343,34 @@ def view_data_section():
     for row in reaction_data:
         with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[6]} ({row[5]})"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g, Memo: {row[4]}")
+            
+            # 그래프와 평균 DoDH 표시
+            c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
+            result = c.fetchone()
+
+            if result:
+                average_dodh, graph_data = result
+                st.write(f"**Average DoDH (%)**: {average_dodh:.2f}")
+                if graph_data:
+                    st.image(graph_data, caption="Saved Graph", use_column_width=True)
+                else:
+                    st.warning("No graph saved for this reaction.")
+            else:
+                st.warning("No results available for this reaction.")
+
             if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
                 reaction_ids_to_delete.append(row[0])
 
     # 실제 데이터 삭제
     for reaction_id in reaction_ids_to_delete:
         c.execute("DELETE FROM reaction WHERE id = ?", (reaction_id,))
+        c.execute("DELETE FROM results WHERE reaction_id = ?", (reaction_id,))
     if reaction_ids_to_delete:
         conn.commit()
-        st.experimental_set_query_params(refresh="true")
-        st.success(f"Deleted reaction ID(s): {', '.join(map(str, reaction_ids_to_delete))}")
-        return  # 다시 로드
+        st.experimental_rerun()  # 새로고침
 
     conn.close()
+
 
 
 
