@@ -313,52 +313,52 @@ def view_data_section():
 
     # Synthesis Data
     st.subheader("Synthesis Data")
-    c.execute("SELECT id, date, name FROM synthesis WHERE user_id = ?", (user_id,))
+    c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
 
+    synthesis_ids_to_delete = []  # 삭제할 합성 데이터 ID를 추적
     for row in synthesis_data:
-        with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
-            st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
+        with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
+            st.write(f"Memo: {row[3]}")
             if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
-                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-                conn.commit()
-                st.experimental_rerun()
+                synthesis_ids_to_delete.append(row[0])
 
-    # Reaction Data and Results
+    # 실제 데이터 삭제
+    for synthesis_id in synthesis_ids_to_delete:
+        c.execute("DELETE FROM synthesis WHERE id = ?", (synthesis_id,))
+    if synthesis_ids_to_delete:
+        conn.commit()
+        st.experimental_set_query_params(refresh="true")
+        st.success(f"Deleted synthesis ID(s): {', '.join(map(str, synthesis_ids_to_delete))}")
+        return  # 다시 로드
+
+    # Reaction Data
     st.subheader("Reaction Data")
-    c.execute("""
-        SELECT 
-            reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, 
-            synthesis.date AS synthesis_date, synthesis.name AS synthesis_name
-        FROM reaction
-        JOIN synthesis ON reaction.synthesis_id = synthesis.id
-        WHERE reaction.user_id = ?
-    """, (user_id,))
+    c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, 
+                        reaction.memo, synthesis.date AS synthesis_date, synthesis.name 
+                 FROM reaction 
+                 JOIN synthesis ON reaction.synthesis_id = synthesis.id 
+                 WHERE reaction.user_id = ?""", (user_id,))
     reaction_data = c.fetchall()
 
+    reaction_ids_to_delete = []  # 삭제할 반응 데이터 ID를 추적
     for row in reaction_data:
-        with st.expander(f"Reaction ID: {row[0]} | Reaction Date: {row[1]} | Catalyst: {row[5]} ({row[4]})"):
-            st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
-            st.write(f"Used Synthesis: {row[5]} (Date: {row[4]})")
-
-            # Fetch results for this reaction
-            c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
-            result = c.fetchone()
-
-            if result:
-                st.write(f"Average DoDH: {result[0]:.2f}%")
-                if result[1]:
-                    st.image(result[1], caption="DoDH (%) Graph")
-            else:
-                st.warning("No results available for this reaction.")
-
-            # Delete reaction button
+        with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[6]} ({row[5]})"):
+            st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g, Memo: {row[4]}")
             if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
-                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
-                conn.commit()
-                st.experimental_rerun()
+                reaction_ids_to_delete.append(row[0])
+
+    # 실제 데이터 삭제
+    for reaction_id in reaction_ids_to_delete:
+        c.execute("DELETE FROM reaction WHERE id = ?", (reaction_id,))
+    if reaction_ids_to_delete:
+        conn.commit()
+        st.experimental_set_query_params(refresh="true")
+        st.success(f"Deleted reaction ID(s): {', '.join(map(str, reaction_ids_to_delete))}")
+        return  # 다시 로드
 
     conn.close()
+
 
 
 
