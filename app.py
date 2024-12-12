@@ -319,6 +319,10 @@ def view_data_section():
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} - {row[2]} ({row[1]})"):
             st.write(f"ID: {row[0]}, Name: {row[2]}, Date: {row[1]}")
+            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
+                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
 
     # Reaction Data and Results
     st.subheader("Reaction Data")
@@ -348,7 +352,14 @@ def view_data_section():
             else:
                 st.warning("No results available for this reaction.")
 
+            # Delete reaction button
+            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
+                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
+
     conn.close()
+
 
 
 # 메인 함수
