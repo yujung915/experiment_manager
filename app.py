@@ -302,18 +302,29 @@ def view_data_section():
 
     user_id = st.session_state.get('user_id', None)
 
+    # Synthesis Data
     st.subheader("Synthesis Data")
     c.execute("SELECT id, date, name, memo, amount FROM synthesis WHERE user_id = ?", (user_id,))
     synthesis_data = c.fetchall()
 
+    synthesis_ids_to_delete = []  # 삭제할 합성 데이터 ID를 추적
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
             st.write(f"Memo: {row[3]}")
             if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
-                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
-                conn.commit()
-                st.experimental_rerun()
+                synthesis_ids_to_delete.append(row[0])
 
+    # 실제 데이터 삭제
+    if synthesis_ids_to_delete:
+        for synthesis_id in synthesis_ids_to_delete:
+            c.execute("DELETE FROM synthesis WHERE id = ?", (synthesis_id,))
+        conn.commit()
+        st.success(f"Deleted synthesis ID(s): {', '.join(map(str, synthesis_ids_to_delete))}")
+        # 데이터 업데이트를 반영하기 위해 섹션을 다시 렌더링
+        st.experimental_set_query_params(refresh="true")
+        return  # 섹션 재렌더링
+
+    # Reaction Data
     st.subheader("Reaction Data")
     c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, 
                         reaction.memo, synthesis.date AS synthesis_date, synthesis.name 
@@ -322,22 +333,41 @@ def view_data_section():
                  WHERE reaction.user_id = ?""", (user_id,))
     reaction_data = c.fetchall()
 
+    reaction_ids_to_delete = []  # 삭제할 반응 데이터 ID를 추적
     for row in reaction_data:
         with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[6]} ({row[5]})"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g, Memo: {row[4]}")
+            
+            # 그래프와 평균 DoDH 표시
             c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
             result = c.fetchone()
+
             if result:
-                st.write(f"**Average DoDH (%)**: {result[0]:.2f}")
-                if result[1]:
-                    st.image(result[1], caption="Saved Graph", use_column_width=True)
+                average_dodh, graph_data = result
+                st.write(f"**Average DoDH (%)**: {average_dodh:.2f}")
+                if graph_data:
+                    st.image(graph_data, caption="Saved Graph", use_column_width=True)
+                else:
+                    st.warning("No graph saved for this reaction.")
+            else:
+                st.warning("No results available for this reaction.")
+
             if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
-                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
-                c.execute("DELETE FROM results WHERE reaction_id = ?", (row[0],))
-                conn.commit()
-                st.experimental_rerun()
+                reaction_ids_to_delete.append(row[0])
+
+    # 실제 데이터 삭제
+    if reaction_ids_to_delete:
+        for reaction_id in reaction_ids_to_delete:
+            c.execute("DELETE FROM reaction WHERE id = ?", (reaction_id,))
+            c.execute("DELETE FROM results WHERE reaction_id = ?", (reaction_id,))
+        conn.commit()
+        st.success(f"Deleted reaction ID(s): {', '.join(map(str, reaction_ids_to_delete))}")
+        # 데이터 업데이트를 반영하기 위해 섹션을 다시 렌더링
+        st.experimental_set_query_params(refresh="true")
+        return  # 섹션 재렌더링
 
     conn.close()
+
 
 # 메인 함수
 def main():
