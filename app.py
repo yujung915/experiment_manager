@@ -304,7 +304,6 @@ def result_section():
 
 
 
-# 데이터 보기 및 결과 확인
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
@@ -323,12 +322,20 @@ def view_data_section():
 
     # Reaction Data and Results
     st.subheader("Reaction Data")
-    c.execute("SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, synthesis.name FROM reaction JOIN synthesis ON reaction.synthesis_id = synthesis.id WHERE reaction.user_id = ?", (user_id,))
+    c.execute("""
+        SELECT 
+            reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, 
+            synthesis.date AS synthesis_date, synthesis.name AS synthesis_name
+        FROM reaction
+        JOIN synthesis ON reaction.synthesis_id = synthesis.id
+        WHERE reaction.user_id = ?
+    """, (user_id,))
     reaction_data = c.fetchall()
 
     for row in reaction_data:
-        with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[4]}"):
+        with st.expander(f"Reaction ID: {row[0]} | Reaction Date: {row[1]} | Catalyst: {row[5]} ({row[4]})"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g")
+            st.write(f"Used Synthesis: {row[5]} (Date: {row[4]})")
 
             # Fetch results for this reaction
             c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
@@ -337,11 +344,12 @@ def view_data_section():
             if result:
                 st.write(f"Average DoDH: {result[0]:.2f}%")
                 if result[1]:
-                    st.image(result[1], caption="Smoothed DoDH (%) Graph")
+                    st.image(result[1], caption="DoDH (%) Graph")
             else:
                 st.warning("No results available for this reaction.")
 
     conn.close()
+
 
 # 메인 함수
 def main():
