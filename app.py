@@ -35,12 +35,14 @@ def initialize_database():
     conn = get_connection()
     c = conn.cursor()
 
+    # 사용자 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE,
                     password TEXT
                 )''')
 
+    # 합성 데이터 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS synthesis (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -51,6 +53,7 @@ def initialize_database():
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
 
+    # 반응 데이터 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS reaction (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
@@ -63,6 +66,7 @@ def initialize_database():
                     FOREIGN KEY (synthesis_id) REFERENCES synthesis (id)
                 )''')
 
+    # 결과 데이터 테이블 생성
     c.execute('''CREATE TABLE IF NOT EXISTS results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reaction_id INTEGER,
@@ -72,6 +76,17 @@ def initialize_database():
                     FOREIGN KEY (reaction_id) REFERENCES reaction (id),
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )''')
+
+    # 누락된 컬럼 추가
+    try:
+        c.execute('ALTER TABLE results ADD COLUMN graph BLOB')
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        c.execute('ALTER TABLE results ADD COLUMN average_dodh REAL')
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
@@ -107,6 +122,7 @@ def signup():
         else:
             st.error("모든 필드를 채워주세요.")
 
+    # 로그인 버튼 추가
     st.markdown("---")
     st.write("이미 계정이 있으신가요?")
     if st.button("Back to Login"):
@@ -145,7 +161,7 @@ def login():
 def render_logout():
     if st.session_state.get('logged_in', False):
         st.markdown(
-            f'<a style="color:white;background-color:{CRIMSON_RED};padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block;" href="/" onclick="window.location.reload();">Logout</a>',
+            f'<a style="color:white;background-color:{CRIMSON_RED};padding:10px 20px;text-decoration:none;border-radius:5px;" href="/" onclick="window.location.reload();">Logout</a>',
             unsafe_allow_html=True
         )
 
@@ -202,12 +218,13 @@ def reaction_section():
         st.error("No synthesis data available. Please add synthesis data first.")
     conn.close()
 
-def save_result_to_db(reaction_id, user_id, fig, average_dodh):
+# 결과 데이터 및 그래프 저장 함수
+def save_result_to_db(reaction_id, user_id, graph, average_dodh):
     conn = get_connection()
     c = conn.cursor()
 
     buffer = BytesIO()
-    fig.savefig(buffer, format='png')
+    graph.savefig(buffer, format='png')
     buffer.seek(0)
     graph_data = buffer.read()
 
@@ -216,6 +233,7 @@ def save_result_to_db(reaction_id, user_id, fig, average_dodh):
     conn.commit()
     conn.close()
 
+# 결과 데이터 및 시각화
 def result_section():
     st.header("Result Section")
     conn = get_connection()
@@ -244,7 +262,6 @@ def result_section():
                     data = pd.read_excel(uploaded_file, engine="openpyxl")
                     if 'Time on stream (h)' in data.columns and 'DoDH(%)' in data.columns:
                         filtered_data = data[['Time on stream (h)', 'DoDH(%)']].dropna()
-
                         time_on_stream = filtered_data['Time on stream (h)'].to_numpy()
                         dodh = filtered_data['DoDH(%)'].to_numpy()
 
@@ -259,7 +276,7 @@ def result_section():
                             smoothed_dodh = savgol_filter(dodh, window_length=11, polyorder=2)
                             fig, ax = plt.subplots()
                             ax.plot(time_on_stream, smoothed_dodh, label="Smoothed DoDH (%)")
-                            ax.set_title("Smoothed DoDH (%) Over Time on Stream")
+                            ax.set_title("Smoothed DoDH (%) Over Time")
                             ax.set_xlabel("Time on stream (h)")
                             ax.set_ylabel("DoDH (%)")
                             ax.legend()
@@ -277,6 +294,7 @@ def result_section():
         st.error("No reaction data available. Please add reaction data first.")
     conn.close()
 
+# View Data 섹션
 def view_data_section():
     st.header("View All Data")
     conn = get_connection()
@@ -291,6 +309,10 @@ def view_data_section():
     for row in synthesis_data:
         with st.expander(f"ID: {row[0]} | Date: {row[1]} | Name: {row[2]} | Amount: {row[4]} g"):
             st.write(f"Memo: {row[3]}")
+            if st.button(f"Delete Synthesis {row[0]}", key=f"delete_synthesis_{row[0]}"):
+                c.execute("DELETE FROM synthesis WHERE id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
 
     st.subheader("Reaction Data")
     c.execute("""SELECT reaction.id, reaction.date, reaction.temperature, reaction.catalyst_amount, 
@@ -303,22 +325,21 @@ def view_data_section():
     for row in reaction_data:
         with st.expander(f"Reaction ID: {row[0]} | Date: {row[1]} | Catalyst: {row[6]} ({row[5]})"):
             st.write(f"Temperature: {row[2]}°C, Catalyst Amount: {row[3]} g, Memo: {row[4]}")
-
             c.execute("SELECT average_dodh, graph FROM results WHERE reaction_id = ?", (row[0],))
             result = c.fetchone()
-
             if result:
-                average_dodh, graph_data = result
-                st.write(f"**Average DoDH (%)**: {average_dodh:.2f}")
-                if graph_data:
-                    st.image(graph_data, caption="Saved Graph", use_column_width=True)
-                else:
-                    st.warning("No graph saved for this reaction.")
-            else:
-                st.warning("No results available for this reaction.")
+                st.write(f"**Average DoDH (%)**: {result[0]:.2f}")
+                if result[1]:
+                    st.image(result[1], caption="Saved Graph", use_column_width=True)
+            if st.button(f"Delete Reaction {row[0]}", key=f"delete_reaction_{row[0]}"):
+                c.execute("DELETE FROM reaction WHERE id = ?", (row[0],))
+                c.execute("DELETE FROM results WHERE reaction_id = ?", (row[0],))
+                conn.commit()
+                st.experimental_rerun()
 
     conn.close()
 
+# 메인 함수
 def main():
     initialize_session_state()
     initialize_database()
